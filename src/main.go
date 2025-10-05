@@ -22,20 +22,20 @@ func main() {
 	// validate binary
 	binaryPath := os.Args[1]
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "binary '%s' not found", binaryPath)
+		fmt.Fprintf(os.Stderr, "makedog: binary '%s' not found", binaryPath)
 		os.Exit(1)
 	}
 
 	// set raw terminal input
 	if err := setRawTerm(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error setting raw mode: %v\n", err)
+		fmt.Fprintf(os.Stderr, "makedog: error setting raw mode: %v\n", err)
 		os.Exit(1)
 	}
 
 	// run loop
 	makedog := NewMakedog(binaryPath)
 	if err := makedog.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "makedog: error: %v\n", err)
 		makedog.exitCleanly(1)
 	}
 }
