@@ -207,14 +207,14 @@ func (w *Makedog) monitor() error {
 		case <-ticker.C:
 			action = w.checkFileModification()
 		case <-w.childExit:
-			w.handleProcessExit()
+			w.handleProcessExit(false)
 			action = Action{startBinary: true}
 		}
 
 		if action.stopBinary {
 			w.stopBinary()
 			<-w.childExit
-			w.handleProcessExit()
+			w.handleProcessExit(true)
 		}
 
 		if action.fn != nil {
@@ -260,7 +260,7 @@ func (w *Makedog) checkFileModification() Action {
 }
 
 // handleProcessExit handles the child process exiting.
-func (w *Makedog) handleProcessExit() {
+func (w *Makedog) handleProcessExit(makedogInitiated bool) {
 	banner("", '-', true)
 
 	exitCode := w.cmd.ProcessState.ExitCode()
@@ -272,15 +272,17 @@ func (w *Makedog) handleProcessExit() {
 	wallTime := time.Since(w.startTime).Nanoseconds()
 
 	var exitDesc string
-	if waitStatus.Signaled() {
-		exitDesc = fmt.Sprintf("killed by %s", signalName(waitStatus.Signal()))
-	} else {
-		exitDesc = fmt.Sprintf("exit code %d", exitCode)
+	if !makedogInitiated {
+		if waitStatus.Signaled() {
+			exitDesc = fmt.Sprintf("killed by %s, ", signalName(waitStatus.Signal()))
+		} else {
+			exitDesc = fmt.Sprintf("exit code %d, ", exitCode)
+		}
 	}
 
 	runnum := 135
 	stopstr := fmt.Sprintf(
-		"stop run %d [%s, %s memory, %s cpu time, %s wall time]",
+		"stop run %d [%s%s memory, %s cpu time, %s wall time]",
 		runnum,
 		exitDesc,
 		formatMemory(sysUsage.Maxrss),
@@ -342,4 +344,5 @@ func (w *Makedog) keypressQuit() {
 // keypressMake runs the make command and restarts the binary if successful.
 func (w *Makedog) keypressMake() {
 	runCommand("make")
+	println()
 }
