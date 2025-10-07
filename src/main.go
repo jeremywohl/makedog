@@ -49,7 +49,7 @@ type Makedog struct {
 	cmd        *exec.Cmd
 	pty        *os.File
 	lastMtime  int64
-	childExit   chan error
+	childExit  chan error
 	startTime  time.Time
 	outputWg   sync.WaitGroup
 }
@@ -172,7 +172,8 @@ func (w *Makedog) getMtime() (int64, error) {
 	return info.ModTime().Unix(), nil
 }
 
-type Action struct {
+// step sets the operations to perform in response to monitor events (keypresses, file changes, process exits).
+type step struct {
 	stopBinary  bool
 	fn          func()
 	startBinary bool
@@ -199,64 +200,73 @@ func (w *Makedog) monitor() error {
 	defer ticker.Stop()
 
 	for {
-		var action Action
+		var s step
 
 		select {
 		case key := <-keyChan:
-			action = w.handleKeypress(key)
+			s = w.handleKeypress(key)
 		case <-ticker.C:
-			action = w.checkFileModification()
+			s = w.checkFileModification()
 		case <-w.childExit:
 			w.handleProcessExit(false)
-			action = Action{startBinary: true}
+			s = step{startBinary: true}
 		}
 
-		if action.stopBinary {
+		if s.stopBinary {
 			w.stopBinary()
 			<-w.childExit
 			w.handleProcessExit(true)
 		}
 
-		if action.fn != nil {
-			action.fn()
+		if s.fn != nil {
+			s.fn()
 		}
 
-		if action.exitAfter {
+		if s.exitAfter {
 			w.exitCleanly(0)
 		}
 
-		if action.startBinary {
+		if s.startBinary {
 			w.startBinary()
 		}
 	}
 }
 
 // handleKeypress processes keypress events.
-func (w *Makedog) handleKeypress(key byte) Action {
+func (w *Makedog) handleKeypress(key byte) step {
 	// Handle Ctrl-C (ASCII 3)
 	if key == 3 {
-		return Action{stopBinary: true, exitAfter: true}
+		return step{stopBinary: true, exitAfter: true}
 	}
 
 	if handler, ok := defaultKeys[key]; ok {
-		return Action{stopBinary: handler.stopProc, fn: func() { handler.fn(w) }, startBinary: handler.stopProc, exitAfter: handler.exitAfter}
+		return step{
+			stopBinary:  handler.stopProc,
+			fn:          func() { handler.fn(w) },
+			startBinary: handler.stopProc,
+			exitAfter:   handler.exitAfter,
+		}
 	}
 
-	return Action{}
+	return step{}
 }
 
 // checkFileModification checks if the binary has been modified and restarts if needed.
-func (w *Makedog) checkFileModification() Action {
+func (w *Makedog) checkFileModification() step {
 	currentMtime, err := w.getMtime()
 	if err != nil {
-		return Action{}
+		return step{}
 	}
 
 	if currentMtime != w.lastMtime {
-		return Action{stopBinary: true, fn: func() { time.Sleep(500 * time.Millisecond) }, startBinary: true}
+		return step{
+			stopBinary:  true,
+			fn:          func() { time.Sleep(500 * time.Millisecond) },
+			startBinary: true,
+		}
 	}
 
-	return Action{}
+	return step{}
 }
 
 // handleProcessExit handles the child process exiting.
