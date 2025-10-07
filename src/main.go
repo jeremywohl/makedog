@@ -9,8 +9,11 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 func main() {
@@ -43,12 +46,16 @@ func main() {
 // Makedog manages the lifecycle of watching and restarting a binary.
 type Makedog struct {
 	binaryPath string
-	process    *os.Process
+	cmd        *exec.Cmd
+	pty        *os.File
 	lastMtime  int64
+	exitChan   chan error
+	startTime  time.Time
+	outputWg   sync.WaitGroup
 }
 
 // NewMakedog creates a new Makedog instance for the given binary path.
-func NewMakedog(binaryPath string) (*Makedog) {
+func NewMakedog(binaryPath string) *Makedog {
 	w := &Makedog{
 		binaryPath: binaryPath,
 	}
@@ -66,18 +73,12 @@ func (w *Makedog) Run() error {
 		return err
 	}
 
-	var err error
-	w.lastMtime, err = w.getMtime()
-	if err != nil {
-		return err
-	}
-
 	return w.monitor()
 }
 
 // exitCleanly performs cleanup and exits the program.
 func (w *Makedog) exitCleanly(status int) {
-	w.stopBinary()
+	w.outputWg.Wait()
 	restoreTerm()
 	os.Exit(status)
 }
@@ -95,56 +96,78 @@ func (w *Makedog) setupSignalHandlers() {
 
 // startBinary starts the monitored binary.
 func (w *Makedog) startBinary() error {
-	banner("start", '-', false)
+	var err error
+	w.lastMtime, err = w.getMtime()
+	if err != nil {
+		return err
+	}
 
 	cmd := exec.Command(w.binaryPath)
 
-	// Create pipes for stdout and stderr
-	stdout, err := cmd.StdoutPipe()
+	w.startTime = time.Now()
+
+	// Start with pty for real-time output
+	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
 
-	cmd.Stdin = os.Stdin
+	println()
+	printf("--> \033[1mstart %s (pid %d)\033[0m\n", w.binaryPath, cmd.Process.Pid)
+	banner("", '-', true)
 
-	if err := cmd.Start(); err != nil {
-		return err
-	}
+	// Process output (stdout and stderr merged)
+	go w.processOutput(ptmx)
 
-	// Process output with timestamps
-	go processOutput(stdout, " | ")
-	go processOutput(stderr, " ! ")
+	w.cmd = cmd
+	w.pty = ptmx
+	w.exitChan = make(chan error, 1)
 
-	w.process = cmd.Process
+	// Monitor process exit
+	go func() {
+		err := cmd.Wait()
+		w.exitChan <- err
+	}()
+
 	return nil
 }
 
-// processOutput reads from a pipe and prints each line with a timestamp and separator.
-func processOutput(reader io.Reader, separator string) {
+// processOutput reads from a pty and prints each line with a timestamp and separator.
+// Uses buffered reading since pty provides line-buffered output from child process.
+func (w *Makedog) processOutput(reader io.Reader) {
+	w.outputWg.Add(1)
+	defer w.outputWg.Done()
+
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		timestamp := time.Now().Format("[2006-01-02 15:04:05.000]")
-		printf("%s%s%s\n", timestamp, separator, scanner.Text())
+		printf("%s  %s\n", timestamp, scanner.Text())
 	}
 }
 
 // stopBinary terminates the monitored binary.
 func (w *Makedog) stopBinary() {
-	if w.process == nil {
+	if w.cmd == nil || w.cmd.Process == nil {
 		return
 	}
 
-	banner("stop", '-', false)
-	println()
+	w.cmd.Process.Signal(syscall.SIGTERM)
 
-	w.process.Signal(syscall.SIGTERM)
-	w.process.Wait()
+	// Close pty to signal EOF to processOutput goroutine
+	if w.pty != nil {
+		w.pty.Close()
+		w.pty = nil
+	}
 
-	w.process = nil
+	// TODO: need a process here for stubborn procs
+	// TODO: avoid this sleep for handle to commence, let's make this an exact handoff
+}
+
+// stopBinaryOutOfBand terminates the monitored binary... TODO: doc about out of main loop
+func (w *Makedog) stopBinaryOutOfBand() {
+	w.stopBinary()
+	<-w.exitChan
+	w.handleProcessExit(false)
 }
 
 // getMtime retrieves the modification time of the binary.
@@ -181,20 +204,38 @@ func (w *Makedog) monitor() error {
 			w.handleKeypress(key)
 		case <-ticker.C:
 			w.checkFileModification()
+		case <-w.exitChan:
+			w.handleProcessExit(true)
 		}
 	}
+}
+
+type Action struct {
+	stopBinary    bool
+	fn            func()
+	restartBinary bool
+	exitAfter     bool
 }
 
 // handleKeypress processes keypress events.
 func (w *Makedog) handleKeypress(key byte) {
 	// Handle Ctrl-C (ASCII 3)
 	if key == 3 {
+		w.stopBinaryOutOfBand()
 		w.exitCleanly(0)
 		return
 	}
 
 	if handler, ok := defaultKeys[key]; ok {
+		if handler.stopProc {
+			w.stopBinaryOutOfBand()
+		}
+
 		handler.fn(w)
+
+		if handler.stopProc {
+			w.startBinary()
+		}
 	}
 }
 
@@ -206,17 +247,54 @@ func (w *Makedog) checkFileModification() {
 	}
 
 	if currentMtime != w.lastMtime {
-		w.stopBinary()
+		w.stopBinaryOutOfBand()
 		time.Sleep(500 * time.Millisecond)
 		w.startBinary()
-		w.lastMtime = currentMtime
 	}
 }
 
-// keypressHandler holds a handler function and its description.
+// handleProcessExit handles the child process exiting.
+func (w *Makedog) handleProcessExit(restart bool) {
+	banner("", '-', true)
+
+	exitCode := w.cmd.ProcessState.ExitCode()
+	waitStatus := w.cmd.ProcessState.Sys().(syscall.WaitStatus)
+	sysUsage := w.cmd.ProcessState.SysUsage().(*syscall.Rusage)
+
+	// Calculate times
+	cpuTime := sysUsage.Utime.Nano() + sysUsage.Stime.Nano()
+	wallTime := time.Since(w.startTime).Nanoseconds()
+
+	var exitDesc string
+	if waitStatus.Signaled() {
+		exitDesc = fmt.Sprintf("killed by %s", signalName(waitStatus.Signal()))
+	} else {
+		exitDesc = fmt.Sprintf("exit code %d", exitCode)
+	}
+
+	runnum := 135
+	stopstr := fmt.Sprintf(
+		"stop run %d [%s, %s memory, %s cpu time, %s wall time]",
+		runnum,
+		exitDesc,
+		formatMemory(sysUsage.Maxrss),
+		formatDuration(cpuTime),
+		formatDuration(wallTime),
+	)
+
+	herald(stopstr)
+	println()
+
+	if restart {
+		w.startBinary()
+	}
+}
+
+// keypressHandler holds a handler function, its description, and whether the process is running during the keypress handler.
 type keypressHandler struct {
-	fn   func(*Makedog)
-	desc string
+	fn       func(*Makedog)
+	desc     string
+	stopProc bool
 }
 
 // defaultKeys maps built-in keys to their handler functions and descriptions.
@@ -224,9 +302,9 @@ var defaultKeys map[byte]keypressHandler
 
 func init() {
 	defaultKeys = map[byte]keypressHandler{
-		'h': {(*Makedog).keypressHelp, "print this help"},
-		'm': {(*Makedog).keypressMake, "run make"},
-		'q': {(*Makedog).keypressQuit, "quit"},
+		'h': {(*Makedog).keypressHelp, "for this help", false},
+		'm': {(*Makedog).keypressMake, "to run make", true},
+		'q': {(*Makedog).keypressQuit, "to quit", true},
 	}
 }
 
@@ -243,7 +321,7 @@ func printKeypressInstructions() {
 
 	var descriptions []string
 	for _, k := range keys {
-		descriptions = append(descriptions, fmt.Sprintf("'%c' to %s", k, defaultKeys[k].desc))
+		descriptions = append(descriptions, fmt.Sprintf("'%c' %s", k, defaultKeys[k].desc))
 	}
 
 	printf("keys: %s\n", strings.Join(descriptions, ", "))
@@ -261,24 +339,5 @@ func (w *Makedog) keypressQuit() {
 
 // keypressMake runs the make command and restarts the binary if successful.
 func (w *Makedog) keypressMake() {
-	w.stopBinary()
-
-	banner("make", '=', false)
-	println()
-
-	cmd := exec.Command("make")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		println()
-		banner("make failed - press any key to continue", '!', false)
-		buf := make([]byte, 1)
-		os.Stdin.Read(buf)
-		println()
-	} else {
-		println()
-		w.startBinary()
-		w.lastMtime, _ = w.getMtime()
-	}
+	runCommand("make")
 }

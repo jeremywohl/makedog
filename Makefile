@@ -15,21 +15,21 @@ all: build
 build: $(BINARY_DIR)/$(BINARY_NAME)
 
 $(BINARY_DIR)/$(BINARY_NAME): $(SRCS) go.mod go.sum
-	go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME) ./src
+	@go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME) ./src
 
 build-linux: $(BINARY_DIR)/$(BINARY_NAME)-linux
 
 $(BINARY_DIR)/$(BINARY_NAME)-linux: $(SRCS) go.mod go.sum
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME)-linux ./src
+	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME)-linux ./src
 
 fmt:
-	go fmt ./...
+	@go fmt ./src/...
 
 clean:
 	rm -rf $(BINARY_DIR)/
 
 run: build
-	makedog $(BINARY_DIR)/$(BINARY_NAME)
+	@makedog $(BINARY_DIR)/$(BINARY_NAME)
 
 test: build
 	@$(BINARY_DIR)/$(BINARY_NAME) ./sample
@@ -41,15 +41,15 @@ deploy: build-linux
 	@scripts/deploy-server
 
 migrations: build
-	$(BINARY_DIR)/$(BINARY_NAME) --migrate
+	@$(BINARY_DIR)/$(BINARY_NAME) --migrate
 
 migrate-forward: build
-	$(BINARY_DIR)/$(BINARY_NAME) --migrate-forward
+	@$(BINARY_DIR)/$(BINARY_NAME) --migrate-forward
 
 migrate-backward: build
-	$(BINARY_DIR)/$(BINARY_NAME) --migrate-backward
+	@$(BINARY_DIR)/$(BINARY_NAME) --migrate-backward
 
 new-migration: build
-	$(BINARY_DIR)/$(BINARY_NAME) --new-migration "$(label)"
+	@$(BINARY_DIR)/$(BINARY_NAME) --new-migration "$(label)"
 
 .PHONY: all build build-linux fmt clean run test migrate migrate-forward migrate-backward new-migration
