@@ -57,7 +57,7 @@ func banner(text string, fill rune, tight bool) {
 }
 
 func herald(format string, args ...interface{}) {
-	printf("--> \033[1m" + format + "\033[0m\n", args...)
+	printf("--> \033[1m"+format+"\033[0m\n", args...)
 }
 
 func line() {
