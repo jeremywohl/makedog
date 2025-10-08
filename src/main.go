@@ -249,23 +249,8 @@ func (w *Makedog) handleKeypress(key byte) step {
 		return step{stopBinary: true, exitAfter: true}
 	}
 
-	// Handle 'r' for restart - special case since it needs to check process state
-	if key == 'r' {
-		processRunning := w.cmd != nil && w.cmd.Process != nil && w.cmd.ProcessState == nil
-		w.clearSpinTracking()
-		return step{
-			stopBinary:  processRunning,
-			startBinary: true,
-		}
-	}
-
 	if handler, ok := defaultKeys[key]; ok {
-		return step{
-			stopBinary:  handler.stopProc,
-			fn:          func() { handler.fn(w) },
-			startBinary: handler.stopProc,
-			exitAfter:   handler.exitAfter,
-		}
+		return handler.fn(w)
 	}
 
 	return step{}
@@ -382,12 +367,10 @@ func _handleProcessExit(state processState, startTime time.Time, makedogInitiate
 	println()
 }
 
-// keypressHandler holds a handler function, its description, and whether the process is running during the keypress handler.
+// keypressHandler holds a handler function and its description.
 type keypressHandler struct {
-	fn        func(*Makedog)
-	desc      string
-	stopProc  bool
-	exitAfter bool
+	fn   func(*Makedog) step
+	desc string
 }
 
 // defaultKeys maps built-in keys to their handler functions and descriptions.
@@ -395,10 +378,10 @@ var defaultKeys map[byte]keypressHandler
 
 func init() {
 	defaultKeys = map[byte]keypressHandler{
-		'h': {(*Makedog).keypressHelp, "for this help", false, false},
-		'm': {(*Makedog).keypressMake, "to run make", true, false},
-		'q': {(*Makedog).keypressQuit, "to quit", true, true},
-		'r': {nil, "to restart", false, false},
+		'h': {(*Makedog).keypressHelp, "for this help"},
+		'm': {(*Makedog).keypressMake, "to run make"},
+		'q': {(*Makedog).keypressQuit, "to quit"},
+		'r': {(*Makedog).keypressRestart, "to restart"},
 	}
 }
 
@@ -422,16 +405,31 @@ func printKeypressInstructions() {
 }
 
 // keypressHelp prints the help message showing available keys.
-func (w *Makedog) keypressHelp() {
+func (w *Makedog) keypressHelp() step {
 	printKeypressInstructions()
+	return step{}
 }
 
 // keypressQuit exits the program cleanly.
-func (w *Makedog) keypressQuit() {
+func (w *Makedog) keypressQuit() step {
+	return step{stopBinary: true, exitAfter: true}
 }
 
 // keypressMake runs the make command and restarts the binary if successful.
-func (w *Makedog) keypressMake() {
-	runCommand("make")
-	println()
+func (w *Makedog) keypressMake() step {
+	return step{
+		stopBinary:  true,
+		fn:          func() { runCommand("make"); println() },
+		startBinary: true,
+	}
+}
+
+// keypressRestart restarts the binary.
+func (w *Makedog) keypressRestart() step {
+	processRunning := w.cmd != nil && w.cmd.Process != nil && w.cmd.ProcessState == nil
+	w.clearSpinTracking()
+	return step{
+		stopBinary:  processRunning,
+		startBinary: true,
+	}
 }

@@ -23,9 +23,9 @@ func TestHandleKeypress(t *testing.T) {
 		expectFnNotNil bool
 	}{
 		{"ctrl-c", 3, true, false, true, false},
-		{"h key", 'h', false, false, false, true},
+		{"h key", 'h', false, false, false, false},
 		{"m key", 'm', true, true, false, true},
-		{"q key", 'q', true, true, true, true},
+		{"q key", 'q', true, false, true, false},
 		{"unknown key", 'x', false, false, false, false},
 	}
 
