@@ -113,7 +113,7 @@ func (w *Makedog) startBinary() error {
 		return err
 	}
 
-	printf("--> \033[1mstart %s (pid %d)\033[0m\n", w.binaryPath, cmd.Process.Pid)
+	herald("start %s (pid %d)", w.binaryPath, cmd.Process.Pid)
 	banner("", '-', true)
 
 	// Process output (stdout and stderr merged)
@@ -291,7 +291,7 @@ func (w *Makedog) handleProcessExit(makedogInitiated bool) {
 	}
 
 	runnum := 135
-	stopstr := fmt.Sprintf(
+	herald(
 		"stop run %d [%s%s memory, %s cpu time, %s wall time]",
 		runnum,
 		exitDesc,
@@ -299,8 +299,6 @@ func (w *Makedog) handleProcessExit(makedogInitiated bool) {
 		formatDuration(cpuTime),
 		formatDuration(wallTime),
 	)
-
-	herald(stopstr)
 	println()
 }
 

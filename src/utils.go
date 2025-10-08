@@ -56,8 +56,8 @@ func banner(text string, fill rune, tight bool) {
 	printf("%s%s%s\n", strings.Repeat(string(fill), leftPad), padded, strings.Repeat(string(fill), rightPad))
 }
 
-func herald(stmt string) {
-	printf("--> \033[1m%s\033[0m\n", stmt)
+func herald(format string, args ...interface{}) {
+	printf("--> \033[1m" + format + "\033[0m\n", args...)
 }
 
 func line() {
@@ -143,7 +143,7 @@ func formatDuration(ns int64) string {
 
 // runCommand runs a command, with display similar to our subprocess.
 func runCommand(name string, args ...string) error {
-	herald(fmt.Sprintf("%s %s", name, strings.Join(args, " ")))
+	herald("%s %s", name, strings.Join(args, " "))
 	line()
 
 	cmd := exec.Command(name, args...)
@@ -151,18 +151,18 @@ func runCommand(name string, args ...string) error {
 	// Get pipes
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		herald(fmt.Sprintf("failed to create stdout pipe: %v", err))
+		herald("failed to create stdout pipe: %v", err)
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		herald(fmt.Sprintf("failed to create stderr pipe: %v", err))
+		herald("failed to create stderr pipe: %v", err)
 		return err
 	}
 
 	// Start command
 	if err := cmd.Start(); err != nil {
-		herald(fmt.Sprintf("failed to start command: %v", err))
+		herald("failed to start command: %v", err)
 		return err
 	}
 
