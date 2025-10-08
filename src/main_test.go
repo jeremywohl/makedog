@@ -15,12 +15,12 @@ func TestHandleKeypress(t *testing.T) {
 	w := &Makedog{binaryPath: "/bin/echo"}
 
 	tests := []struct {
-		name            string
-		key             byte
-		expectStop      bool
-		expectStart     bool
-		expectExit      bool
-		expectFnNotNil  bool
+		name           string
+		key            byte
+		expectStop     bool
+		expectStart    bool
+		expectExit     bool
+		expectFnNotNil bool
 	}{
 		{"ctrl-c", 3, true, false, true, false},
 		{"h key", 'h', false, false, false, true},
@@ -47,6 +47,98 @@ func TestHandleKeypress(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleKeypressRestart(t *testing.T) {
+	t.Run("restart with running process", func(t *testing.T) {
+		cmd := exec.Command("sleep", "10")
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("Failed to start test process: %v", err)
+		}
+		defer cmd.Process.Kill()
+
+		// Verify ProcessState is nil (process still running, not Wait()ed)
+		if cmd.ProcessState != nil {
+			t.Fatal("ProcessState should be nil for running process")
+		}
+
+		w := &Makedog{
+			binaryPath:   "/bin/echo",
+			cmd:          cmd,
+			restartTimes: []time.Time{time.Now()},
+		}
+
+		s := w.handleKeypress('r')
+
+		if !s.stopBinary {
+			t.Error("Expected stopBinary = true when process is running")
+		}
+		if !s.startBinary {
+			t.Error("Expected startBinary = true")
+		}
+		if s.exitAfter {
+			t.Error("Expected exitAfter = false")
+		}
+		if len(w.restartTimes) != 0 {
+			t.Error("Expected spin tracking to be cleared")
+		}
+	})
+
+	t.Run("restart with no running process", func(t *testing.T) {
+		w := &Makedog{
+			binaryPath:   "/bin/echo",
+			cmd:          nil,
+			restartTimes: []time.Time{time.Now()},
+		}
+
+		s := w.handleKeypress('r')
+
+		if s.stopBinary {
+			t.Error("Expected stopBinary = false when process is not running")
+		}
+		if !s.startBinary {
+			t.Error("Expected startBinary = true")
+		}
+		if s.exitAfter {
+			t.Error("Expected exitAfter = false")
+		}
+		if len(w.restartTimes) != 0 {
+			t.Error("Expected spin tracking to be cleared")
+		}
+	})
+
+	t.Run("restart with exited process", func(t *testing.T) {
+		cmd := exec.Command("echo", "test")
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Failed to run test process: %v", err)
+		}
+
+		// Verify ProcessState is not nil (process has exited and been Wait()ed)
+		if cmd.ProcessState == nil {
+			t.Fatal("ProcessState should not be nil for exited process")
+		}
+
+		w := &Makedog{
+			binaryPath:   "/bin/echo",
+			cmd:          cmd,
+			restartTimes: []time.Time{time.Now()},
+		}
+
+		s := w.handleKeypress('r')
+
+		if s.stopBinary {
+			t.Error("Expected stopBinary = false when process has already exited")
+		}
+		if !s.startBinary {
+			t.Error("Expected startBinary = true")
+		}
+		if s.exitAfter {
+			t.Error("Expected exitAfter = false")
+		}
+		if len(w.restartTimes) != 0 {
+			t.Error("Expected spin tracking to be cleared")
+		}
+	})
 }
 
 func TestCheckFileModification(t *testing.T) {
@@ -403,11 +495,11 @@ func TestHandleProcessExit(t *testing.T) {
 			expectedCodeOrSig: "exit code 1",
 		},
 		{
-			name:              "makedog-initiated stop",
-			cmdArgs:           []string{"echo", "test"},
-			makedogInitiated:  true,
-			expectExitCode:    false,
-			expectSignal:      false,
+			name:             "makedog-initiated stop",
+			cmdArgs:          []string{"echo", "test"},
+			makedogInitiated: true,
+			expectExitCode:   false,
+			expectSignal:     false,
 		},
 		{
 			name:              "external signal termination",
@@ -496,5 +588,124 @@ func TestHandleProcessExit(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCheckForSpin(t *testing.T) {
+	t.Run("less than 3 restarts", func(t *testing.T) {
+		w := &Makedog{
+			binaryPath: "/bin/echo",
+			startTime:  time.Now(),
+		}
+
+		// First restart
+		if w.checkForSpin() {
+			t.Error("Expected no spin with 1 restart")
+		}
+
+		// Second restart
+		if w.checkForSpin() {
+			t.Error("Expected no spin with 2 restarts")
+		}
+	})
+
+	t.Run("3 rapid restarts within 5 seconds", func(t *testing.T) {
+		w := &Makedog{
+			binaryPath: "/bin/echo",
+			startTime:  time.Now(),
+		}
+
+		// Simulate 3 rapid restarts
+		w.checkForSpin()
+		w.checkForSpin()
+		if !w.checkForSpin() {
+			t.Error("Expected spin detected with 3 rapid restarts")
+		}
+	})
+
+	t.Run("3 restarts spread over more than 5 seconds", func(t *testing.T) {
+		w := &Makedog{
+			binaryPath: "/bin/echo",
+			startTime:  time.Now(),
+		}
+
+		// First restart at T-6s
+		w.restartTimes = []time.Time{time.Now().Add(-6 * time.Second)}
+
+		// Second restart at T-3s
+		w.restartTimes = append(w.restartTimes, time.Now().Add(-3*time.Second))
+
+		// Third restart now
+		if w.checkForSpin() {
+			t.Error("Expected no spin when restarts spread over >5 seconds")
+		}
+	})
+
+	t.Run("sliding window keeps only last 5", func(t *testing.T) {
+		w := &Makedog{
+			binaryPath: "/bin/echo",
+			startTime:  time.Now(),
+		}
+
+		// Add 7 restarts
+		for i := 0; i < 7; i++ {
+			w.checkForSpin()
+		}
+
+		if len(w.restartTimes) != 5 {
+			t.Errorf("Expected restartTimes length = 5, got %d", len(w.restartTimes))
+		}
+	})
+
+	t.Run("old restarts don't count", func(t *testing.T) {
+		w := &Makedog{
+			binaryPath: "/bin/echo",
+			startTime:  time.Now(),
+		}
+
+		// Add 2 old restarts (>5 seconds ago)
+		w.restartTimes = []time.Time{
+			time.Now().Add(-10 * time.Second),
+			time.Now().Add(-8 * time.Second),
+		}
+
+		// Add 2 recent restarts
+		w.checkForSpin()
+		if w.checkForSpin() {
+			t.Error("Expected no spin: only 2 restarts within 5 seconds (2 old ones shouldn't count)")
+		}
+	})
+
+	t.Run("successful run clears spin tracking", func(t *testing.T) {
+		w := &Makedog{
+			binaryPath: "/bin/echo",
+			startTime:  time.Now().Add(-15 * time.Second), // Process ran for 15 seconds
+		}
+
+		// Add some restart times
+		w.restartTimes = []time.Time{time.Now(), time.Now(), time.Now()}
+
+		// Check for spin - should clear tracking since process ran >= 10 seconds
+		if w.checkForSpin() {
+			t.Error("Expected no spin when process ran >= 10 seconds")
+		}
+
+		if w.restartTimes != nil {
+			t.Error("Expected spin tracking to be cleared after successful run")
+		}
+	})
+}
+
+func TestClearSpinTracking(t *testing.T) {
+	w := &Makedog{binaryPath: "/bin/echo"}
+
+	// Add some restart times
+	w.restartTimes = []time.Time{time.Now(), time.Now(), time.Now()}
+
+	// Clear tracking
+	w.clearSpinTracking()
+
+	if w.restartTimes != nil {
+		t.Error("Expected restartTimes to be nil after clearing")
 	}
 }

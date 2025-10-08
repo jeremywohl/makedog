@@ -45,13 +45,14 @@ func main() {
 
 // Makedog manages the lifecycle of watching and restarting a binary.
 type Makedog struct {
-	binaryPath string
-	cmd        *exec.Cmd
-	pty        *os.File
-	lastMtime  int64
-	childExit  chan error
-	startTime  time.Time
-	outputWg   sync.WaitGroup
+	binaryPath   string
+	cmd          *exec.Cmd
+	pty          *os.File
+	lastMtime    int64
+	childExit    chan error
+	startTime    time.Time
+	outputWg     sync.WaitGroup
+	restartTimes []time.Time
 }
 
 // NewMakedog creates a new Makedog instance for the given binary path.
@@ -209,7 +210,16 @@ func (w *Makedog) monitor() error {
 			s = w.checkFileModification()
 		case <-w.childExit:
 			w.handleProcessExit(false)
-			s = step{startBinary: true}
+
+			// Check for spinning process
+			if w.checkForSpin() {
+				herald("pausing for spinning process")
+				printKeypressInstructions()
+				println()
+				s = step{}
+			} else {
+				s = step{startBinary: true}
+			}
 		}
 
 		if s.stopBinary {
@@ -237,6 +247,16 @@ func (w *Makedog) handleKeypress(key byte) step {
 	// Handle Ctrl-C (ASCII 3)
 	if key == 3 {
 		return step{stopBinary: true, exitAfter: true}
+	}
+
+	// Handle 'r' for restart - special case since it needs to check process state
+	if key == 'r' {
+		processRunning := w.cmd != nil && w.cmd.Process != nil && w.cmd.ProcessState == nil
+		w.clearSpinTracking()
+		return step{
+			stopBinary:  processRunning,
+			startBinary: true,
+		}
 	}
 
 	if handler, ok := defaultKeys[key]; ok {
@@ -269,6 +289,47 @@ func (w *Makedog) checkFileModification() step {
 	return step{}
 }
 
+// checkForSpin detects if the process is spinning (exits rapidly after start).
+// Records the current restart time and returns true if ≥3 restarts occurred within 5 seconds.
+// Clears spin tracking if process ran successfully (≥10 seconds).
+func (w *Makedog) checkForSpin() bool {
+	// Check if process ran long enough to be considered successful
+	runDuration := time.Since(w.startTime)
+	if runDuration >= 10*time.Second {
+		w.clearSpinTracking()
+		return false
+	}
+
+	now := time.Now()
+	w.restartTimes = append(w.restartTimes, now)
+
+	// Keep only last 5 restart times
+	if len(w.restartTimes) > 5 {
+		w.restartTimes = w.restartTimes[len(w.restartTimes)-5:]
+	}
+
+	// Need at least 3 restarts to detect spinning
+	if len(w.restartTimes) < 3 {
+		return false
+	}
+
+	// Check if we have ≥3 restarts within 5 seconds
+	threshold := now.Add(-5 * time.Second)
+	recentRestarts := 0
+	for _, t := range w.restartTimes {
+		if t.After(threshold) {
+			recentRestarts++
+		}
+	}
+
+	return recentRestarts >= 3
+}
+
+// clearSpinTracking clears the restart tracking, called when process runs successfully.
+func (w *Makedog) clearSpinTracking() {
+	w.restartTimes = nil
+}
+
 // waitStatus abstracts syscall.WaitStatus for mocking.
 type waitStatus interface {
 	Signaled() bool
@@ -278,7 +339,7 @@ type waitStatus interface {
 // processState abstracts os.ProcessState for mocking.
 type processState interface {
 	ExitCode() int
-	Sys() interface{} // Returns waitStatus
+	Sys() interface{}      // Returns waitStatus
 	SysUsage() interface{} // Returns *syscall.Rusage
 }
 
@@ -337,6 +398,7 @@ func init() {
 		'h': {(*Makedog).keypressHelp, "for this help", false, false},
 		'm': {(*Makedog).keypressMake, "to run make", true, false},
 		'q': {(*Makedog).keypressQuit, "to quit", true, true},
+		'r': {nil, "to restart", false, false},
 	}
 }
 
