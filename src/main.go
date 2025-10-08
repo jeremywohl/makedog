@@ -269,18 +269,37 @@ func (w *Makedog) checkFileModification() step {
 	return step{}
 }
 
+// waitStatus abstracts syscall.WaitStatus for mocking.
+type waitStatus interface {
+	Signaled() bool
+	Signal() syscall.Signal
+}
+
+// processState abstracts os.ProcessState for mocking.
+type processState interface {
+	ExitCode() int
+	Sys() interface{} // Returns waitStatus
+	SysUsage() interface{} // Returns *syscall.Rusage
+}
+
 // handleProcessExit handles the child process exiting.
 func (w *Makedog) handleProcessExit(makedogInitiated bool) {
+	_handleProcessExit(w.cmd.ProcessState, w.startTime, makedogInitiated)
+}
+
+// _handleProcessExit handles the child process exiting (internal, testable function).
+func _handleProcessExit(state processState, startTime time.Time, makedogInitiated bool) {
 	banner("", '-', true)
 
-	exitCode := w.cmd.ProcessState.ExitCode()
-	waitStatus := w.cmd.ProcessState.Sys().(syscall.WaitStatus)
-	sysUsage := w.cmd.ProcessState.SysUsage().(*syscall.Rusage)
+	exitCode := state.ExitCode()
+	waitStatus := state.Sys().(waitStatus)
+	sysUsage := state.SysUsage().(*syscall.Rusage)
 
 	// Calculate times
 	cpuTime := sysUsage.Utime.Nano() + sysUsage.Stime.Nano()
-	wallTime := time.Since(w.startTime).Nanoseconds()
+	wallTime := time.Since(startTime).Nanoseconds()
 
+	// How did our death go down
 	var exitDesc string
 	if !makedogInitiated {
 		if waitStatus.Signaled() {

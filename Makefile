@@ -27,12 +27,22 @@ fmt:
 
 clean:
 	rm -rf $(BINARY_DIR)/
+	rm -f test/fixtures/test-program
 
 run: build
 	@makedog $(BINARY_DIR)/$(BINARY_NAME)
 
-test: build
-	@$(BINARY_DIR)/$(BINARY_NAME) ./sample
+test:
+	@go test -v ./src/...
+
+test-short:
+	@go test -short -v ./src/...
+
+fixture:
+	@go build -o $(BINARY_DIR)/test-program test/fixtures/test-program.go
+
+demo: build fixture
+	@$(BINARY_DIR)/$(BINARY_NAME) $(BINARY_DIR)/test-program
 
 run-claude: build
 	$(BINARY_DIR)/$(BINARY_NAME)
@@ -52,4 +62,4 @@ migrate-backward: build
 new-migration: build
 	@$(BINARY_DIR)/$(BINARY_NAME) --new-migration "$(label)"
 
-.PHONY: all build build-linux fmt clean run test migrate migrate-forward migrate-backward new-migration
+.PHONY: all build build-linux fmt clean run test test-short fixture demo migrate migrate-forward migrate-backward new-migration
