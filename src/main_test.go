@@ -24,6 +24,7 @@ func TestHandleKeypress(t *testing.T) {
 	}{
 		{"ctrl-c", 3, true, false, true, false},
 		{"h key", 'h', false, false, false, false},
+		{"c key", 'c', false, false, false, false},
 		{"m key", 'm', true, true, false, true},
 		{"q key", 'q', true, false, true, false},
 		{"unknown key", 'x', false, false, false, false},
@@ -391,7 +392,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-5 * time.Second),
 			makedogInitiated: false,
-			expectedInOutput: "stop run 135 [killed by SIGTERM, 256MB memory, 3s cpu time, 5s wall time]",
+			expectedInOutput: "stop run 135 [killed by TERM, 256MB memory, 3s cpu time, 5s wall time]",
 		},
 		{
 			name: "killed by SIGKILL",
@@ -405,7 +406,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-10 * time.Second),
 			makedogInitiated: false,
-			expectedInOutput: "stop run 135 [killed by SIGKILL, 512MB memory, 2s cpu time, 10s wall time]",
+			expectedInOutput: "stop run 135 [killed by KILL, 512MB memory, 2s cpu time, 10s wall time]",
 		},
 		{
 			name: "makedog-initiated stop (no exit desc)",
@@ -444,8 +445,8 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			}
 			os.Stdout = w
 
-			// Call _handleProcessExit (internal testable function)
-			_handleProcessExit(tt.state, tt.startTime, tt.makedogInitiated)
+			// Call _printExitDetails (internal testable function)
+			_printExitDetails(tt.state, tt.startTime, tt.makedogInitiated)
 
 			// Close write end and read captured output
 			w.Close()
@@ -465,7 +466,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 	}
 }
 
-// Test handleProcessExit output formatting and makedogInitiated behavior
+// Test printExitDetails output formatting and makedogInitiated behavior
 func TestHandleProcessExit(t *testing.T) {
 	// Save original stdout and restore after test
 	oldStdout := os.Stdout
@@ -507,7 +508,7 @@ func TestHandleProcessExit(t *testing.T) {
 			killWithSignal:    true,
 			makedogInitiated:  false,
 			expectSignal:      true,
-			expectedCodeOrSig: "killed by SIGTERM",
+			expectedCodeOrSig: "killed by TERM",
 		},
 	}
 
@@ -543,8 +544,8 @@ func TestHandleProcessExit(t *testing.T) {
 				startTime:  time.Now().Add(-2 * time.Second), // Simulate 2s runtime
 			}
 
-			// Call the method (which calls _handleProcessExit internally)
-			makedog.handleProcessExit(tt.makedogInitiated)
+			// Call the method (which calls _printExitDetails internally)
+			makedog.printExitDetails(tt.makedogInitiated)
 
 			// Close write end and read captured output
 			w.Close()

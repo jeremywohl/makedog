@@ -78,6 +78,11 @@ func println() {
 	fmt.Print("\r\n")
 }
 
+// clearScreen wipes the terminal and moves the cursor to the home position.
+func clearScreen() {
+	fmt.Print("\033[2J\033[H")
+}
+
 // formatMemory converts bytes to a human-readable memory string.
 // Returns format like "54MB", "1.2GB", "128KB".
 func formatMemory(bytes int64) string {
@@ -193,67 +198,67 @@ func runCommand(name string, args ...string) error {
 	return err
 }
 
-// signalName converts a signal to its SIG* name (e.g., SIGTERM, SIGKILL).
+// signalName converts a signal to its name (e.g., TERM, KILL).
 func signalName(sig syscall.Signal) string {
 	switch sig {
 	case syscall.SIGABRT:
-		return "SIGABRT"
+		return "ABRT"
 	case syscall.SIGALRM:
-		return "SIGALRM"
+		return "ALRM"
 	case syscall.SIGBUS:
-		return "SIGBUS"
+		return "BUS"
 	case syscall.SIGCHLD:
-		return "SIGCHLD"
+		return "CHLD"
 	case syscall.SIGCONT:
-		return "SIGCONT"
+		return "CONT"
 	case syscall.SIGFPE:
-		return "SIGFPE"
+		return "FPE"
 	case syscall.SIGHUP:
-		return "SIGHUP"
+		return "HUP"
 	case syscall.SIGILL:
-		return "SIGILL"
+		return "ILL"
 	case syscall.SIGINT:
-		return "SIGINT"
+		return "INT"
 	case syscall.SIGIO:
-		return "SIGIO"
+		return "IO"
 	case syscall.SIGKILL:
-		return "SIGKILL"
+		return "KILL"
 	case syscall.SIGPIPE:
-		return "SIGPIPE"
+		return "PIPE"
 	case syscall.SIGPROF:
-		return "SIGPROF"
+		return "PROF"
 	case syscall.SIGQUIT:
-		return "SIGQUIT"
+		return "QUIT"
 	case syscall.SIGSEGV:
-		return "SIGSEGV"
+		return "SEGV"
 	case syscall.SIGSTOP:
-		return "SIGSTOP"
+		return "STOP"
 	case syscall.SIGSYS:
-		return "SIGSYS"
+		return "SYS"
 	case syscall.SIGTERM:
-		return "SIGTERM"
+		return "TERM"
 	case syscall.SIGTRAP:
-		return "SIGTRAP"
+		return "TRAP"
 	case syscall.SIGTSTP:
-		return "SIGTSTP"
+		return "TSTP"
 	case syscall.SIGTTIN:
-		return "SIGTTIN"
+		return "TTIN"
 	case syscall.SIGTTOU:
-		return "SIGTTOU"
+		return "TTOU"
 	case syscall.SIGURG:
-		return "SIGURG"
+		return "URG"
 	case syscall.SIGUSR1:
-		return "SIGUSR1"
+		return "USR1"
 	case syscall.SIGUSR2:
-		return "SIGUSR2"
+		return "USR2"
 	case syscall.SIGVTALRM:
-		return "SIGVTALRM"
+		return "VTALRM"
 	case syscall.SIGWINCH:
-		return "SIGWINCH"
+		return "WINCH"
 	case syscall.SIGXCPU:
-		return "SIGXCPU"
+		return "XCPU"
 	case syscall.SIGXFSZ:
-		return "SIGXFSZ"
+		return "XFSZ"
 	default:
 		return fmt.Sprintf("signal %d", sig)
 	}

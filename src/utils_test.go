@@ -70,15 +70,15 @@ func TestSignalName(t *testing.T) {
 		signal   syscall.Signal
 		expected string
 	}{
-		{syscall.SIGTERM, "SIGTERM"},
-		{syscall.SIGINT, "SIGINT"},
-		{syscall.SIGKILL, "SIGKILL"},
-		{syscall.SIGHUP, "SIGHUP"},
-		{syscall.SIGQUIT, "SIGQUIT"},
-		{syscall.SIGSEGV, "SIGSEGV"},
-		{syscall.SIGPIPE, "SIGPIPE"},
-		{syscall.SIGUSR1, "SIGUSR1"},
-		{syscall.SIGUSR2, "SIGUSR2"},
+		{syscall.SIGTERM, "TERM"},
+		{syscall.SIGINT, "INT"},
+		{syscall.SIGKILL, "KILL"},
+		{syscall.SIGHUP, "HUP"},
+		{syscall.SIGQUIT, "QUIT"},
+		{syscall.SIGSEGV, "SEGV"},
+		{syscall.SIGPIPE, "PIPE"},
+		{syscall.SIGUSR1, "USR1"},
+		{syscall.SIGUSR2, "USR2"},
 		{syscall.Signal(999), "signal 999"}, // Unknown signal
 	}
 

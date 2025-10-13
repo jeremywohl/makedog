@@ -2,7 +2,7 @@
 BINARY_DIR  = "bin"
 BINARY_NAME = "makedog"
 
-# Build variables
+# Discoverables
 VERSION?   = dev
 COMMIT     = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME = $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -27,7 +27,6 @@ fmt:
 
 clean:
 	rm -rf $(BINARY_DIR)/
-	rm -f test/fixtures/test-program
 
 run: build
 	@makedog $(BINARY_DIR)/$(BINARY_NAME)
@@ -38,11 +37,23 @@ test:
 test-short:
 	@go test -short -v ./src/...
 
-fixture:
-	@go build -o $(BINARY_DIR)/test-program test/fixtures/test-program.go
+fixture-pulse:
+	@go build -o $(BINARY_DIR)/test-pulse test/fixtures/test-pulse.go
 
-demo: build fixture
-	@$(BINARY_DIR)/$(BINARY_NAME) $(BINARY_DIR)/test-program
+fixture-sigecho:
+	@go build -o $(BINARY_DIR)/test-sigecho test/fixtures/test-sigecho.go
+
+fixture-spin:
+	@go build -o $(BINARY_DIR)/test-spin test/fixtures/test-spin.go
+
+demo-pulse: build fixture-pulse
+	@$(BINARY_DIR)/$(BINARY_NAME) $(BINARY_DIR)/test-pulse
+
+demo-sigecho: build fixture-sigecho
+	@$(BINARY_DIR)/$(BINARY_NAME) $(BINARY_DIR)/test-sigecho
+
+demo-spin: build fixture-spin
+	@$(BINARY_DIR)/$(BINARY_NAME) $(BINARY_DIR)/test-spin
 
 run-claude: build
 	$(BINARY_DIR)/$(BINARY_NAME)
@@ -62,4 +73,4 @@ migrate-backward: build
 new-migration: build
 	@$(BINARY_DIR)/$(BINARY_NAME) --new-migration "$(label)"
 
-.PHONY: all build build-linux fmt clean run test test-short fixture demo migrate migrate-forward migrate-backward new-migration
+.PHONY: all build build-linux fmt clean run test test-short fixture-pulse fixture-sigecho fixture-spin demo-pulse demo-sigecho demo-spin migrate migrate-forward migrate-backward new-migration
