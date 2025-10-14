@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -16,13 +17,30 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Printf("Usage: makedog <binary-path>\n")
+	// set custom usage function
+	flag.Usage = usage
+
+	// parse flags
+	configPath := flag.String("c", "", "path to config file")
+	flag.StringVar(configPath, "config", "", "path to config file")
+	showHelp := flag.Bool("h", false, "print help")
+	flag.BoolVar(showHelp, "help", false, "print help")
+	flag.Parse()
+
+	// check for help flag
+	if *showHelp {
+		usage()
+		os.Exit(0)
+	}
+
+	// check for binary path argument
+	if flag.NArg() < 1 {
+		usage()
 		os.Exit(1)
 	}
 
 	// validate binary
-	binaryPath := os.Args[1]
+	binaryPath := flag.Arg(0)
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "makedog: binary '%s' not found", binaryPath)
 		os.Exit(1)
@@ -35,7 +53,7 @@ func main() {
 	}
 
 	// run loop
-	makedog := NewMakedog(binaryPath)
+	makedog := NewMakedog(binaryPath, *configPath)
 	if err := makedog.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "makedog: error: %v\n", err)
 		makedog.exitCleanly(1)
@@ -53,12 +71,14 @@ type Makedog struct {
 	startTime    time.Time
 	outputWg     sync.WaitGroup
 	restartTimes []time.Time
+	config       *Config
 }
 
 // NewMakedog creates a new Makedog instance for the given binary path.
-func NewMakedog(binaryPath string) *Makedog {
+func NewMakedog(binaryPath, configPath string) *Makedog {
 	w := &Makedog{
 		binaryPath: binaryPath,
+		config:     loadConfig(configPath),
 	}
 
 	w.setupSignalHandlers()

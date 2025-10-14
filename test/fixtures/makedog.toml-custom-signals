@@ -1,0 +1,12 @@
+# Example makedog configuration demonstrating custom signal menu.
+# Signals are displayed in order.
+
+signals = [
+  { signal = "HUP",   name = "reload"          },
+  { signal = "USR1",  name = "debug-on"        },
+  { signal = "USR2",  name = "debug-off"       },
+  { signal = "TERM",  name = "graceful reload" },
+  { signal = "INT",   name = "interrupt"       },
+  { signal = "QUIT",  name = "quit"            },
+  { signal = "WINCH", name = "window"          },
+]

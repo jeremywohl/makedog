@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"syscall"
 )
 
 // keypressHandler holds a handler function and its description.
@@ -21,11 +20,11 @@ var defaultKeys map[byte]keypressHandler
 func init() {
 	defaultKeys = map[byte]keypressHandler{
 		'c': {(*Makedog).keypressClear, "to clear screen", false},
-		'g': {(*Makedog).keypressSignal, "to send signal", true},
 		'h': {(*Makedog).keypressHelp, "for this help", false},
 		'm': {(*Makedog).keypressMake, "to run make", false},
 		'q': {(*Makedog).keypressQuit, "to quit", false},
 		'r': {(*Makedog).keypressRestart, "to restart", false},
+		's': {(*Makedog).keypressSignal, "to send signal", true},
 	}
 }
 
@@ -89,114 +88,7 @@ func (w *Makedog) keypressRestart() step {
 	return step{stopBinary: true, startBinary: true}
 }
 
-// Signal mappings for signal menu.
-var signalRow1 = []struct {
-	key    byte
-	name   string
-	signal syscall.Signal
-}{
-	{'1', "HUP", syscall.SIGHUP},
-	{'2', "TERM", syscall.SIGTERM},
-	{'3', "INT", syscall.SIGINT},
-	{'4', "QUIT", syscall.SIGQUIT},
-	{'5', "USR1", syscall.SIGUSR1},
-	{'6', "USR2", syscall.SIGUSR2},
-	{'7', "WINCH", syscall.SIGWINCH},
-	{'8', "TTOU", syscall.SIGTTOU},
-	{'9', "TTIN", syscall.SIGTTIN},
-}
-
-var signalRow2 = []struct {
-	key    string
-	name   string
-	signal syscall.Signal
-}{
-	{"a1", "KILL", syscall.SIGKILL},
-	{"a2", "STOP", syscall.SIGSTOP},
-	{"a3", "CONT", syscall.SIGCONT},
-	{"a4", "TSTP", syscall.SIGTSTP},
-	{"a5", "ALRM", syscall.SIGALRM},
-	{"a6", "CHLD", syscall.SIGCHLD},
-	{"a7", "PIPE", syscall.SIGPIPE},
-	{"a8", "ABRT", syscall.SIGABRT},
-}
-
 // keypressSignal enters signal selection mode.
 func (w *Makedog) keypressSignal() step {
-	// Check if process is running
-	if w.cmd == nil || w.cmd.Process == nil {
-		printf("no process running\n")
-		return step{}
-	}
-
-	// Print signal menu
-	printSignalMenu()
-
-	// Wait for signal selection from keyChan
-	firstKey := <-w.keyChan
-
-	// ESC key - return to main loop
-	if firstKey == 27 {
-		printf("signal cancelled\n")
-		return step{}
-	}
-
-	// Check first row (single digit keys)
-	for _, sig := range signalRow1 {
-		if firstKey == sig.key {
-			w.sendSignal(sig.name, sig.signal)
-			return step{}
-		}
-	}
-
-	// Check if it's 'a' for second row
-	if firstKey == 'a' {
-		// Read the second character
-		secondKey := <-w.keyChan
-
-		// Build the full key string
-		fullKey := string([]byte{'a', secondKey})
-
-		// Find matching signal in second row
-		for _, sig := range signalRow2 {
-			if fullKey == sig.key {
-				w.sendSignal(sig.name, sig.signal)
-				return step{}
-			}
-		}
-	}
-
-	printf("invalid signal selection\n")
-	return step{}
-}
-
-// printSignalMenu displays the signal selection menu.
-func printSignalMenu() {
-	// First row
-	var row1Items []string
-	for _, sig := range signalRow1 {
-		row1Items = append(row1Items, fmt.Sprintf(" %c: %-5s", sig.key, sig.name))
-	}
-	printf("  %s  (ESC to cancel)\n", strings.Join(row1Items, " "))
-
-	// Second row
-	var row2Items []string
-	for _, sig := range signalRow2 {
-		row2Items = append(row2Items, fmt.Sprintf("%2s: %-5s", sig.key, sig.name))
-	}
-	printf("  %s\n", strings.Join(row2Items, " "))
-}
-
-// sendSignal sends a signal to the child process.
-func (w *Makedog) sendSignal(name string, sig syscall.Signal) {
-	if w.cmd == nil || w.cmd.Process == nil {
-		printf("no process running\n")
-		return
-	}
-
-	herald("sending %s to pid %d", name, w.cmd.Process.Pid)
-	err := w.cmd.Process.Signal(sig)
-	if err != nil {
-		printf("error sending signal: %v\n", err)
-	}
+	return w.handleSignalMenu()
 }

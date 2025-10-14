@@ -55,6 +55,9 @@ demo-sigecho: build fixture-sigecho
 demo-spin: build fixture-spin
 	@$(BINARY_DIR)/$(BINARY_NAME) $(BINARY_DIR)/test-spin
 
+demo-custom-signals: build fixture-sigecho
+	@$(BINARY_DIR)/$(BINARY_NAME) --config test/fixtures/makedog.toml-custom-signals $(BINARY_DIR)/test-sigecho
+
 run-claude: build
 	$(BINARY_DIR)/$(BINARY_NAME)
 
@@ -73,4 +76,4 @@ migrate-backward: build
 new-migration: build
 	@$(BINARY_DIR)/$(BINARY_NAME) --new-migration "$(label)"
 
-.PHONY: all build build-linux fmt clean run test test-short fixture-pulse fixture-sigecho fixture-spin demo-pulse demo-sigecho demo-spin migrate migrate-forward migrate-backward new-migration
+.PHONY: all build build-linux fmt clean run test test-short fixture-pulse fixture-sigecho fixture-spin demo-pulse demo-sigecho demo-spin demo-custom-signals migrate migrate-forward migrate-backward new-migration

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 
 	"golang.org/x/term"
 )
@@ -196,70 +195,4 @@ func runCommand(name string, args ...string) error {
 	}
 
 	return err
-}
-
-// signalName converts a signal to its name (e.g., TERM, KILL).
-func signalName(sig syscall.Signal) string {
-	switch sig {
-	case syscall.SIGABRT:
-		return "ABRT"
-	case syscall.SIGALRM:
-		return "ALRM"
-	case syscall.SIGBUS:
-		return "BUS"
-	case syscall.SIGCHLD:
-		return "CHLD"
-	case syscall.SIGCONT:
-		return "CONT"
-	case syscall.SIGFPE:
-		return "FPE"
-	case syscall.SIGHUP:
-		return "HUP"
-	case syscall.SIGILL:
-		return "ILL"
-	case syscall.SIGINT:
-		return "INT"
-	case syscall.SIGIO:
-		return "IO"
-	case syscall.SIGKILL:
-		return "KILL"
-	case syscall.SIGPIPE:
-		return "PIPE"
-	case syscall.SIGPROF:
-		return "PROF"
-	case syscall.SIGQUIT:
-		return "QUIT"
-	case syscall.SIGSEGV:
-		return "SEGV"
-	case syscall.SIGSTOP:
-		return "STOP"
-	case syscall.SIGSYS:
-		return "SYS"
-	case syscall.SIGTERM:
-		return "TERM"
-	case syscall.SIGTRAP:
-		return "TRAP"
-	case syscall.SIGTSTP:
-		return "TSTP"
-	case syscall.SIGTTIN:
-		return "TTIN"
-	case syscall.SIGTTOU:
-		return "TTOU"
-	case syscall.SIGURG:
-		return "URG"
-	case syscall.SIGUSR1:
-		return "USR1"
-	case syscall.SIGUSR2:
-		return "USR2"
-	case syscall.SIGVTALRM:
-		return "VTALRM"
-	case syscall.SIGWINCH:
-		return "WINCH"
-	case syscall.SIGXCPU:
-		return "XCPU"
-	case syscall.SIGXFSZ:
-		return "XFSZ"
-	default:
-		return fmt.Sprintf("signal %d", sig)
-	}
 }
