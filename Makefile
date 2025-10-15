@@ -28,14 +28,13 @@ fmt:
 clean:
 	rm -rf $(BINARY_DIR)/
 
-run: build
-	@makedog $(BINARY_DIR)/$(BINARY_NAME)
-
 test:
 	@go test -v ./src/...
 
 test-short:
 	@go test -short -v ./src/...
+
+# Demo fixtures
 
 fixture-pulse:
 	@go build -o $(BINARY_DIR)/test-pulse test/fixtures/test-pulse.go
@@ -58,22 +57,4 @@ demo-spin: build fixture-spin
 demo-custom-signals: build fixture-sigecho
 	@$(BINARY_DIR)/$(BINARY_NAME) --config test/fixtures/makedog.toml-custom-signals $(BINARY_DIR)/test-sigecho
 
-run-claude: build
-	$(BINARY_DIR)/$(BINARY_NAME)
-
-deploy: build-linux
-	@scripts/deploy-server
-
-migrations: build
-	@$(BINARY_DIR)/$(BINARY_NAME) --migrate
-
-migrate-forward: build
-	@$(BINARY_DIR)/$(BINARY_NAME) --migrate-forward
-
-migrate-backward: build
-	@$(BINARY_DIR)/$(BINARY_NAME) --migrate-backward
-
-new-migration: build
-	@$(BINARY_DIR)/$(BINARY_NAME) --new-migration "$(label)"
-
-.PHONY: all build build-linux fmt clean run test test-short fixture-pulse fixture-sigecho fixture-spin demo-pulse demo-sigecho demo-spin demo-custom-signals migrate migrate-forward migrate-backward new-migration
+.PHONY: all build build-linux fmt clean run test test-short fixture-pulse fixture-sigecho fixture-spin demo-pulse demo-sigecho demo-spin demo-custom-signals
