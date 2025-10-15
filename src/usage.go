@@ -22,7 +22,7 @@ func usage() {
 	printStderr(" %s [OPTIONS] <binary-path>\n\n", boldStyle.Render("makedog"))
 
 	printStderr("%s\n", boldUnderStyle.Render("Arguments:"))
-	printStderr("  <binary-path>  the path to the binary to watch and restart\n\n")
+	printStderr("  <binary-path>  a binary (or script) to watch and restart\n\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Options:"))
 	printOption("-c, --config <path>", "Path to specific configuration, rather than search for one")
