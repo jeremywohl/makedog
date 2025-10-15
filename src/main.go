@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -17,15 +18,22 @@ import (
 )
 
 func main() {
-	// set custom usage function
-	flag.Usage = usage
-
-	// parse flags
+	// setup flags
+	flag.CommandLine.Init(flag.CommandLine.Name(), flag.ContinueOnError)
+	flag.CommandLine.SetOutput(io.Discard)
+	flag.Usage = func() {} // prevent library's usage display
 	configPath := flag.String("c", "", "path to config file")
 	flag.StringVar(configPath, "config", "", "path to config file")
 	showHelp := flag.Bool("h", false, "print help")
 	flag.BoolVar(showHelp, "help", false, "print help")
-	flag.Parse()
+
+	// parse flags
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		errMsg := regexp.MustCompile(`-(\w{2,})`).ReplaceAllString(err.Error(), `--$1`)
+		fmt.Fprintf(os.Stderr, "makedog: %s\n\n", errMsg)
+		usage()
+		os.Exit(1)
+	}
 
 	// check for help flag
 	if *showHelp {
@@ -35,6 +43,7 @@ func main() {
 
 	// check for binary path argument
 	if flag.NArg() < 1 {
+		fmt.Fprint(os.Stderr, "makedog: no binary?\n\n")
 		usage()
 		os.Exit(1)
 	}
