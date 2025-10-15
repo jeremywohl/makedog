@@ -197,7 +197,6 @@ func (w *Makedog) sendSignal(name string, sig syscall.Signal) {
 	}
 }
 
-
 // signalName converts a signal to its name (e.g., TERM, KILL).
 func signalName(sig syscall.Signal) string {
 	switch sig {
