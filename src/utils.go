@@ -3,6 +3,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -195,4 +197,38 @@ func runCommand(name string, args ...string) error {
 	}
 
 	return err
+}
+
+// getBinaryHash computes the SHA256 hash of a binary file.
+func getBinaryHash(binaryPath string) (string, error) {
+	file, err := os.Open(binaryPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+
+	hash := hex.EncodeToString(hasher.Sum(nil))
+	return hash, nil
+}
+
+// getGitInfo retrieves both the current git branch name and full commit hash in a single call.
+// Returns (branch, commit, error).
+func getGitInfo() (string, string, error) {
+	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:short) %(objectname)", "--points-at", "HEAD", "refs/heads")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", "", err
+	}
+
+	parts := strings.Fields(strings.TrimSpace(string(output)))
+	if len(parts) != 2 {
+		return "", "", nil
+	}
+
+	return parts[0], parts[1], nil
 }

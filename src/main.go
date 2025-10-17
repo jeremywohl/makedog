@@ -143,7 +143,21 @@ func (w *Makedog) startBinary() error {
 		return err
 	}
 
-	herald("start %s (pid %d)", w.binaryPath, cmd.Process.Pid)
+	// Collect metadata
+	binaryHash, _ := getBinaryHash(w.binaryPath)
+	gitBranch, gitCommit, _ := getGitInfo()
+
+	// Build the start message
+	msg := fmt.Sprintf("start %s (pid %d", w.binaryPath, cmd.Process.Pid)
+	if binaryHash != "" {
+		msg += fmt.Sprintf(", hash %s", binaryHash[:7])
+	}
+	if gitBranch != "" && gitCommit != "" {
+		msg += fmt.Sprintf(", git %s/%s", gitBranch, gitCommit[:7])
+	}
+	msg += ")"
+
+	herald(msg)
 	banner("", '-', true)
 
 	// Process output (stdout and stderr merged)
