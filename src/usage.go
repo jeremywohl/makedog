@@ -10,7 +10,6 @@ import (
 
 var (
 	boldStyle      = lipgloss.NewStyle().Bold(true)
-	underlineStyle = lipgloss.NewStyle().Underline(true)
 	boldUnderStyle = lipgloss.NewStyle().Bold(true).Underline(true)
 )
 

@@ -27,7 +27,7 @@ func TestHandleKeypress(t *testing.T) {
 		{"c key", 'c', false, false, false, false},
 		{"m key", 'm', true, true, false, true},
 		{"q key", 'q', true, false, true, false},
-		{"unknown key", 'x', false, false, false, false},
+		{"unknown key", 'z', false, false, false, false},
 	}
 
 	for _, tt := range tests {
@@ -43,103 +43,171 @@ func TestHandleKeypress(t *testing.T) {
 			if s.exitAfter != tt.expectExit {
 				t.Errorf("exitAfter = %v; want %v", s.exitAfter, tt.expectExit)
 			}
-			if (s.fn != nil) != tt.expectFnNotNil {
-				t.Errorf("fn != nil = %v; want %v", s.fn != nil, tt.expectFnNotNil)
+			if (s.action != nil) != tt.expectFnNotNil {
+				t.Errorf("fn != nil = %v; want %v", s.action != nil, tt.expectFnNotNil)
 			}
 		})
 	}
 }
 
 func TestHandleKeypressRestart(t *testing.T) {
-	t.Run("restart with running process", func(t *testing.T) {
-		cmd := exec.Command("sleep", "10")
-		if err := cmd.Start(); err != nil {
-			t.Fatalf("Failed to start test process: %v", err)
-		}
-		defer cmd.Process.Kill()
+	tests := []struct {
+		name              string
+		setupProcess      func(t *testing.T) *exec.Cmd
+		expectStop        bool
+		expectStart       bool
+		expectExit        bool
+		expectSpinCleared bool
+	}{
+		{
+			name: "restart with running process",
+			setupProcess: func(t *testing.T) *exec.Cmd {
+				cmd := exec.Command("sleep", "10")
+				if err := cmd.Start(); err != nil {
+					t.Fatalf("Failed to start test process: %v", err)
+				}
+				t.Cleanup(func() { cmd.Process.Kill() })
 
-		// Verify ProcessState is nil (process still running, not Wait()ed)
-		if cmd.ProcessState != nil {
-			t.Fatal("ProcessState should be nil for running process")
-		}
+				// Verify ProcessState is nil (process still running, not Wait()ed)
+				if cmd.ProcessState != nil {
+					t.Fatal("ProcessState should be nil for running process")
+				}
+				return cmd
+			},
+			expectStop:        true,
+			expectStart:       true,
+			expectExit:        false,
+			expectSpinCleared: true,
+		},
+		{
+			name: "restart with no running process",
+			setupProcess: func(t *testing.T) *exec.Cmd {
+				return nil
+			},
+			expectStop:        false,
+			expectStart:       false,
+			expectExit:        false,
+			expectSpinCleared: false,
+		},
+		{
+			name: "restart with exited process",
+			setupProcess: func(t *testing.T) *exec.Cmd {
+				cmd := exec.Command("echo", "test")
+				if err := cmd.Run(); err != nil {
+					t.Fatalf("Failed to run test process: %v", err)
+				}
 
-		w := &Makedog{
-			binaryPath:   "/bin/echo",
-			cmd:          cmd,
-			restartTimes: []time.Time{time.Now()},
-		}
+				// Verify ProcessState is not nil (process has exited and been Wait()ed)
+				if cmd.ProcessState == nil {
+					t.Fatal("ProcessState should not be nil for exited process")
+				}
+				return cmd
+			},
+			expectStop:        false,
+			expectStart:       false,
+			expectExit:        false,
+			expectSpinCleared: false,
+		},
+	}
 
-		s := w.handleKeypress('r')
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := tt.setupProcess(t)
+			w := &Makedog{
+				binaryPath:   "/bin/echo",
+				cmd:          cmd,
+				restartTimes: []time.Time{time.Now()},
+			}
 
-		if !s.stopBinary {
-			t.Error("Expected stopBinary = true when process is running")
-		}
-		if !s.startBinary {
-			t.Error("Expected startBinary = true")
-		}
-		if s.exitAfter {
-			t.Error("Expected exitAfter = false")
-		}
-		if len(w.restartTimes) != 0 {
-			t.Error("Expected spin tracking to be cleared")
-		}
-	})
+			s := w.handleKeypress('r')
 
-	t.Run("restart with no running process", func(t *testing.T) {
-		w := &Makedog{
-			binaryPath:   "/bin/echo",
-			cmd:          nil,
-			restartTimes: []time.Time{time.Now()},
-		}
+			if s.stopBinary != tt.expectStop {
+				t.Errorf("stopBinary = %v; want %v", s.stopBinary, tt.expectStop)
+			}
+			if s.startBinary != tt.expectStart {
+				t.Errorf("startBinary = %v; want %v", s.startBinary, tt.expectStart)
+			}
+			if s.exitAfter != tt.expectExit {
+				t.Errorf("exitAfter = %v; want %v", s.exitAfter, tt.expectExit)
+			}
 
-		s := w.handleKeypress('r')
+			if tt.expectSpinCleared && len(w.restartTimes) != 0 {
+				t.Error("Expected spin tracking to be cleared")
+			}
+			if !tt.expectSpinCleared && len(w.restartTimes) == 0 {
+				t.Error("Expected spin tracking to be preserved")
+			}
+		})
+	}
+}
 
-		if s.stopBinary {
-			t.Error("Expected stopBinary = false when process is not running")
-		}
-		if !s.startBinary {
-			t.Error("Expected startBinary = true")
-		}
-		if s.exitAfter {
-			t.Error("Expected exitAfter = false")
-		}
-		if len(w.restartTimes) != 0 {
-			t.Error("Expected spin tracking to be cleared")
-		}
-	})
+func TestHandleKeypressStartStop(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupProcess func(t *testing.T) *exec.Cmd
+		expectStop   bool
+		expectStart  bool
+		expectExit   bool
+	}{
+		{
+			name: "stop running process",
+			setupProcess: func(t *testing.T) *exec.Cmd {
+				cmd := exec.Command("sleep", "10")
+				if err := cmd.Start(); err != nil {
+					t.Fatalf("Failed to start test process: %v", err)
+				}
+				t.Cleanup(func() { cmd.Process.Kill() })
+				return cmd
+			},
+			expectStop:  true,
+			expectStart: false,
+			expectExit:  false,
+		},
+		{
+			name: "start when no process running",
+			setupProcess: func(t *testing.T) *exec.Cmd {
+				return nil
+			},
+			expectStop:  false,
+			expectStart: true,
+			expectExit:  false,
+		},
+		{
+			name: "start with exited process",
+			setupProcess: func(t *testing.T) *exec.Cmd {
+				cmd := exec.Command("echo", "test")
+				if err := cmd.Run(); err != nil {
+					t.Fatalf("Failed to run test process: %v", err)
+				}
+				return cmd
+			},
+			expectStop:  false,
+			expectStart: true,
+			expectExit:  false,
+		},
+	}
 
-	t.Run("restart with exited process", func(t *testing.T) {
-		cmd := exec.Command("echo", "test")
-		if err := cmd.Run(); err != nil {
-			t.Fatalf("Failed to run test process: %v", err)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := tt.setupProcess(t)
+			w := &Makedog{
+				binaryPath: "/bin/echo",
+				cmd:        cmd,
+			}
 
-		// Verify ProcessState is not nil (process has exited and been Wait()ed)
-		if cmd.ProcessState == nil {
-			t.Fatal("ProcessState should not be nil for exited process")
-		}
+			s := w.handleKeypress('x')
 
-		w := &Makedog{
-			binaryPath:   "/bin/echo",
-			cmd:          cmd,
-			restartTimes: []time.Time{time.Now()},
-		}
-
-		s := w.handleKeypress('r')
-
-		if s.stopBinary {
-			t.Error("Expected stopBinary = false when process has already exited")
-		}
-		if !s.startBinary {
-			t.Error("Expected startBinary = true")
-		}
-		if s.exitAfter {
-			t.Error("Expected exitAfter = false")
-		}
-		if len(w.restartTimes) != 0 {
-			t.Error("Expected spin tracking to be cleared")
-		}
-	})
+			if s.stopBinary != tt.expectStop {
+				t.Errorf("stopBinary = %v; want %v", s.stopBinary, tt.expectStop)
+			}
+			if s.startBinary != tt.expectStart {
+				t.Errorf("startBinary = %v; want %v", s.startBinary, tt.expectStart)
+			}
+			if s.exitAfter != tt.expectExit {
+				t.Errorf("exitAfter = %v; want %v", s.exitAfter, tt.expectExit)
+			}
+		})
+	}
 }
 
 func TestCheckFileModification(t *testing.T) {
@@ -164,7 +232,7 @@ func TestCheckFileModification(t *testing.T) {
 
 	// Test 1: No modification - should return empty step
 	s := w.checkFileModification()
-	if s.stopBinary || s.startBinary || s.exitAfter || s.fn != nil {
+	if s.stopBinary || s.startBinary || s.exitAfter || s.action != nil {
 		t.Error("Expected empty step when file not modified")
 	}
 
@@ -184,7 +252,7 @@ func TestCheckFileModification(t *testing.T) {
 	if !s.startBinary {
 		t.Error("Expected startBinary when file modified")
 	}
-	if s.fn == nil {
+	if s.action == nil {
 		t.Error("Expected fn to be set when file modified")
 	}
 	if s.exitAfter {
@@ -365,7 +433,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-wallTime),
 			makedogInitiated: false,
-			expectedInOutput: "stop run 135 [exit code 0, 54MB memory, 2s cpu time, 3s wall time]",
+			expectedInOutput: "stop  135 /test/binary [exit code 0, 54MB memory, 2s cpu time, 3s wall time]",
 		},
 		{
 			name: "external exit code 1",
@@ -378,7 +446,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-2 * time.Second),
 			makedogInitiated: false,
-			expectedInOutput: "stop run 135 [exit code 1, 128MB memory, 1s cpu time, 2s wall time]",
+			expectedInOutput: "stop  135 /test/binary [exit code 1, 128MB memory, 1s cpu time, 2s wall time]",
 		},
 		{
 			name: "killed by SIGTERM",
@@ -392,7 +460,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-5 * time.Second),
 			makedogInitiated: false,
-			expectedInOutput: "stop run 135 [killed by TERM, 256MB memory, 3s cpu time, 5s wall time]",
+			expectedInOutput: "stop  135 /test/binary [killed by TERM, 256MB memory, 3s cpu time, 5s wall time]",
 		},
 		{
 			name: "killed by SIGKILL",
@@ -406,7 +474,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-10 * time.Second),
 			makedogInitiated: false,
-			expectedInOutput: "stop run 135 [killed by KILL, 512MB memory, 2s cpu time, 10s wall time]",
+			expectedInOutput: "stop  135 /test/binary [killed by KILL, 512MB memory, 2s cpu time, 10s wall time]",
 		},
 		{
 			name: "makedog-initiated stop (no exit desc)",
@@ -419,7 +487,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-1 * time.Second),
 			makedogInitiated: true,
-			expectedInOutput: "stop run 135 [64MB memory, 1s cpu time, 1s wall time]",
+			expectedInOutput: "stop  135 /test/binary [64MB memory, 1s cpu time, 1s wall time]",
 		},
 		{
 			name: "long running with complex times",
@@ -432,7 +500,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			},
 			startTime:        baseTime.Add(-15 * time.Minute),
 			makedogInitiated: false,
-			expectedInOutput: "stop run 135 [exit code 0, 1.0GB memory, 7m:45s cpu time, 15m wall time]",
+			expectedInOutput: "stop  135 /test/binary [exit code 0, 1.0GB memory, 7m:45s cpu time, 15m wall time]",
 		},
 	}
 
@@ -446,7 +514,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			os.Stdout = w
 
 			// Call _printExitDetails (internal testable function)
-			_printExitDetails(tt.state, tt.startTime, tt.makedogInitiated)
+			_printExitDetails(tt.state, tt.startTime, "/test/binary", tt.makedogInitiated, "")
 
 			// Close write end and read captured output
 			w.Close()
@@ -558,8 +626,8 @@ func TestHandleProcessExit(t *testing.T) {
 			os.Stdout = oldStdout
 
 			// Verify output contains expected elements
-			if !strings.Contains(output, "stop run") {
-				t.Errorf("Expected output to contain 'stop run', got: %s", output)
+			if !strings.Contains(output, "stop  ") {
+				t.Errorf("Expected output to contain 'stop  ', got: %s", output)
 			}
 
 			if !strings.Contains(output, "memory") {

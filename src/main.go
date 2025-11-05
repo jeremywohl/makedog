@@ -81,6 +81,7 @@ type Makedog struct {
 	outputWg     sync.WaitGroup
 	restartTimes []time.Time
 	config       *Config
+	stopReason   string
 }
 
 // NewMakedog creates a new Makedog instance for the given binary path.
@@ -136,6 +137,7 @@ func (w *Makedog) startBinary() error {
 	cmd := exec.Command(w.binaryPath)
 
 	w.startTime = time.Now()
+	w.stopReason = ""
 
 	// Start with pty for real-time output
 	ptmx, err := pty.Start(cmd)
@@ -148,7 +150,7 @@ func (w *Makedog) startBinary() error {
 	gitBranch, gitCommit, _ := getGitInfo()
 
 	// Build the start message
-	msg := fmt.Sprintf("start %s (pid %d", w.binaryPath, cmd.Process.Pid)
+	msg := fmt.Sprintf("start 135 %s (pid %d", w.binaryPath, cmd.Process.Pid)
 	if binaryHash != "" {
 		msg += fmt.Sprintf(", hash %s", binaryHash[:7])
 	}
@@ -157,8 +159,7 @@ func (w *Makedog) startBinary() error {
 	}
 	msg += ")"
 
-	herald(msg)
-	banner("", '-', true)
+	reportCommand("%s", msg)
 
 	// Process output (stdout and stderr merged)
 	go w.processOutput(ptmx)
@@ -215,7 +216,7 @@ func (w *Makedog) stopBinary() {
 	case <-w.childExit:
 		exited = true
 	case <-timer.C:
-		herald("process unresponsive after SIGTERM, sending SIGKILL")
+		reportEvent("process unresponsive after SIGTERM, sending SIGKILL")
 		if err := w.cmd.Process.Signal(syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			printf("error sending SIGKILL: %v\n", err)
 		}
@@ -246,6 +247,7 @@ type step struct {
 	action      func() // do we run said function?
 	startBinary bool   // do we start the binary after said function?
 	exitAfter   bool   // do we exit makedog altogether after we complete the above?
+	stopReason  string // why did the binary stop, whether internal or external?
 }
 
 // monitor runs the main loop, for file changes and keypresses.
@@ -280,7 +282,7 @@ func (w *Makedog) monitor() error {
 
 			// Check for spinning process
 			if w.checkForSpin() {
-				herald("pausing for spinning process")
+				reportEvent("pausing for spinning process")
 				w.printKeypressInstructions()
 				println()
 				s = step{}
@@ -291,6 +293,7 @@ func (w *Makedog) monitor() error {
 
 		if s.stopBinary {
 			if w.processRunning() {
+				w.stopReason = s.stopReason
 				w.stopBinary()
 				w.printExitDetails(true)
 			}
@@ -314,7 +317,7 @@ func (w *Makedog) monitor() error {
 func (w *Makedog) handleKeypress(key byte) step {
 	// Handle Ctrl-C (ASCII 3)
 	if key == 3 {
-		return step{stopBinary: true, exitAfter: true}
+		return step{stopBinary: true, exitAfter: true, stopReason: "manual interruption"}
 	}
 
 	if handler, ok := defaultKeys[key]; ok {
@@ -340,6 +343,7 @@ func (w *Makedog) checkFileModification() step {
 			stopBinary:  true,
 			action:      func() { time.Sleep(500 * time.Millisecond) },
 			startBinary: true,
+			stopReason:  "binary modified",
 		}
 	}
 
@@ -402,13 +406,11 @@ type processState interface {
 
 // printExitDetails handles the child process exiting.
 func (w *Makedog) printExitDetails(makedogInitiated bool) {
-	_printExitDetails(w.cmd.ProcessState, w.startTime, makedogInitiated)
+	_printExitDetails(w.cmd.ProcessState, w.startTime, w.binaryPath, makedogInitiated, w.stopReason)
 }
 
 // _printExitDetails handles the child process exiting (internal, testable function).
-func _printExitDetails(state processState, startTime time.Time, makedogInitiated bool) {
-	banner("", '-', true)
-
+func _printExitDetails(state processState, startTime time.Time, binaryPath string, makedogInitiated bool, stopReason string) {
 	exitCode := state.ExitCode()
 	waitStatus := state.Sys().(waitStatus)
 	sysUsage := state.SysUsage().(*syscall.Rusage)
@@ -422,19 +424,28 @@ func _printExitDetails(state processState, startTime time.Time, makedogInitiated
 	if !makedogInitiated {
 		if waitStatus.Signaled() {
 			exitDesc = fmt.Sprintf("killed by %s, ", signalName(waitStatus.Signal()))
+			stopReason = "exited after external signal " + signalName(waitStatus.Signal())
 		} else {
 			exitDesc = fmt.Sprintf("exit code %d, ", exitCode)
 		}
 	}
 
 	runnum := 135
-	herald(
-		"stop run %d [%s%s memory, %s cpu time, %s wall time]",
+	reportCommand(
+		"stop  %d %s [%s%s memory, %s cpu time, %s wall time]",
 		runnum,
+		binaryPath,
 		exitDesc,
 		formatMemory(sysUsage.Maxrss),
 		formatDuration(cpuTime),
 		formatDuration(wallTime),
 	)
+
+	println()
+
+	if stopReason != "" {
+		reportEvent("%s", stopReason)
+	}
+
 	println()
 }

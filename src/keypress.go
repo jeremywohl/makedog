@@ -23,7 +23,7 @@ func init() {
 		'h': {(*Makedog).keypressHelp, "for this help", false},
 		'm': {(*Makedog).keypressMake, "to run make", false},
 		'q': {(*Makedog).keypressQuit, "to quit", false},
-		'r': {(*Makedog).keypressRestart, "to restart", false},
+		'r': {(*Makedog).keypressRestart, "to restart", true},
 		's': {(*Makedog).keypressSignal, "to send signal", true},
 	}
 }
@@ -70,7 +70,7 @@ func (w *Makedog) keypressClear() step {
 
 // keypressQuit exits the program cleanly.
 func (w *Makedog) keypressQuit() step {
-	return step{stopBinary: true, exitAfter: true}
+	return step{stopBinary: true, exitAfter: true, stopReason: "quit requested"}
 }
 
 // keypressMake runs the make command and restarts the binary if successful.
@@ -79,13 +79,14 @@ func (w *Makedog) keypressMake() step {
 		stopBinary:  true,
 		action:      func() { runCommand("make"); println() },
 		startBinary: true,
+		stopReason:  "make requested",
 	}
 }
 
 // keypressRestart restarts the binary.
 func (w *Makedog) keypressRestart() step {
 	w.clearSpinTracking()
-	return step{stopBinary: true, startBinary: true}
+	return step{stopBinary: true, startBinary: true, stopReason: "restart requested"}
 }
 
 // keypressSignal enters signal selection mode.

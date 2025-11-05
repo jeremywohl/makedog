@@ -111,8 +111,45 @@ func buildSignalMenu(config *Config) []signalMenuItem {
 
 // printSignalMenu displays the signal selection menu.
 func printSignalMenu(items []signalMenuItem) {
-	// Group by row (9 items per row)
-	const itemsPerRow = 9
+	// Build descriptions and calculate max width
+	descriptions := make([]string, len(items))
+	maxDescWidth := 0
+	for i, item := range items {
+		sigName := signalName(item.signal)
+		if item.name == sigName {
+			// Default signal name
+			descriptions[i] = item.name
+		} else {
+			// Custom description from config - show both signal name and description
+			descriptions[i] = fmt.Sprintf("%s (%s)", item.name, sigName)
+		}
+		if len(descriptions[i]) > maxDescWidth {
+			maxDescWidth = len(descriptions[i])
+		}
+	}
+
+	// Get terminal width to determine items per row
+	cols := 80
+	if width, _, err := getTermSize(); err == nil {
+		cols = width
+	}
+
+	// Calculate how many items can fit per row (max 9)
+	// Item format: "  " + "%2s: %-*s" + " " = 2 + 2 + 2 + maxDescWidth + 1
+	const marginLeft = 2                  // Leading "  "
+	const maxItemsPerRow = 9              // Never exceed 9 items per row
+	itemWidth := 2 + 2 + maxDescWidth + 1 // key(2) + ": "(2) + desc + space(1)
+
+	availableWidth := cols - marginLeft
+	itemsPerRow := availableWidth / itemWidth
+	if itemsPerRow < 1 {
+		itemsPerRow = 1
+	}
+	if itemsPerRow > maxItemsPerRow {
+		itemsPerRow = maxItemsPerRow
+	}
+
+	// Print all rows
 	for i := 0; i < len(items); i += itemsPerRow {
 		end := i + itemsPerRow
 		if end > len(items) {
@@ -120,16 +157,12 @@ func printSignalMenu(items []signalMenuItem) {
 		}
 
 		var rowItems []string
-		for _, item := range items[i:end] {
-			rowItems = append(rowItems, fmt.Sprintf("%2s: %s %-5s", item.key, signalName(item.signal), item.name))
+		for j := i; j < end; j++ {
+			item := items[j]
+			rowItems = append(rowItems, fmt.Sprintf("%2s: %-*s", item.key, maxDescWidth, descriptions[j]))
 		}
 
-		suffix := ""
-		if i == 0 {
-			suffix = "  (ESC to cancel)"
-		}
-
-		printf("  %s%s\n", strings.Join(rowItems, " "), suffix)
+		printf("  %s\n", strings.Join(rowItems, " "))
 	}
 }
 
@@ -142,6 +175,7 @@ func (w *Makedog) handleSignalMenu() step {
 	}
 
 	// Build and print signal menu
+	reportEvent("Choose a signal (or ESC to cancel)")
 	items := buildSignalMenu(w.config)
 	printSignalMenu(items)
 
@@ -150,7 +184,7 @@ func (w *Makedog) handleSignalMenu() step {
 
 	// ESC key - return to main loop
 	if firstKey == 27 {
-		printf("signal cancelled\n")
+		reportEvent("signal cancelled")
 		return step{}
 	}
 
@@ -190,7 +224,12 @@ func (w *Makedog) sendSignal(name string, sig syscall.Signal) {
 		return
 	}
 
-	herald("sending %s to pid %d", name, w.cmd.Process.Pid)
+	var nativeName string
+	if signalName(sig) != name {
+		nativeName = " (" + signalName(sig) + ")"
+	}
+	reportEvent("sending %s%s to pid %d", name, nativeName, w.cmd.Process.Pid)
+
 	err := w.cmd.Process.Signal(sig)
 	if err != nil {
 		printf("error sending signal: %v\n", err)

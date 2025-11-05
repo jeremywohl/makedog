@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 )
 
@@ -34,10 +36,15 @@ func restoreTerm() {
 	}
 }
 
-// banner prints text centered with a fill character.
-func banner(text string, fill rune, tight bool) {
+// getTermSize returns the terminal width and height.
+func getTermSize() (width, height int, err error) {
+	return term.GetSize(int(os.Stdout.Fd()))
+}
+
+// flagline prints text centered with a fill character.
+func flagline(text string, fill rune, tight bool) {
 	cols := 80
-	if width, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+	if width, _, err := getTermSize(); err == nil {
 		cols = width
 	}
 
@@ -57,12 +64,29 @@ func banner(text string, fill rune, tight bool) {
 	printf("%s%s%s\n", strings.Repeat(string(fill), leftPad), padded, strings.Repeat(string(fill), rightPad))
 }
 
-func herald(format string, args ...interface{}) {
-	printf("--> \033[1m"+format+"\033[0m\n", args...)
+func line() {
+	flagline("", '-', true)
 }
 
-func line() {
-	banner("", '-', true)
+var commandStyle = lipgloss.NewStyle().Underline(true)
+
+func reportCommand(format string, args ...interface{}) {
+	text := fmt.Sprintf(format, args...)
+	printf("--> %s\n", commandStyle.Render(text))
+}
+
+var eventStyle = lipgloss.NewStyle().Bold(true)
+
+func reportEvent(format string, args ...interface{}) {
+	text := fmt.Sprintf(format, args...)
+	printf("* %s\n", eventStyle.Render(text))
+}
+
+var errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("red"))
+
+func reportError(format string, args ...interface{}) {
+	text := fmt.Sprintf(format, args...)
+	printf("! %s\n", errorStyle.Render(text))
 }
 
 // printf prints formatted output with proper line endings for raw terminal mode.
@@ -81,7 +105,7 @@ func println() {
 
 // clearScreen wipes the terminal and moves the cursor to the home position.
 func clearScreen() {
-	fmt.Print("\033[2J\033[H")
+	fmt.Print(ansi.EraseEntireDisplay + ansi.CursorHomePosition + ansi.EraseEntireScreen)
 }
 
 // formatMemory converts bytes to a human-readable memory string.
@@ -149,7 +173,11 @@ func formatDuration(ns int64) string {
 
 // runCommand runs a command, with display similar to our subprocess.
 func runCommand(name string, args ...string) error {
-	herald("%s %s", name, strings.Join(args, " "))
+	text := name
+	if len(args) != 0 {
+		text += " " + strings.Join(args, " ")
+	}
+	reportCommand("%s", text)
 	line()
 
 	cmd := exec.Command(name, args...)
@@ -157,18 +185,18 @@ func runCommand(name string, args ...string) error {
 	// Get pipes
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		herald("failed to create stdout pipe: %v", err)
+		reportError("failed to create stdout pipe: %v", err)
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		herald("failed to create stderr pipe: %v", err)
+		reportError("failed to create stderr pipe: %v", err)
 		return err
 	}
 
 	// Start command
 	if err := cmd.Start(); err != nil {
-		herald("failed to start command: %v", err)
+		reportError("failed to start command: %v", err)
 		return err
 	}
 
@@ -193,7 +221,7 @@ func runCommand(name string, args ...string) error {
 	line()
 
 	if err != nil {
-		herald(fmt.Sprintf("%s failed: %v", name, err))
+		reportError("%s failed: %v", name, err)
 	}
 
 	return err
