@@ -26,6 +26,7 @@ func init() {
 		'r': {(*Makedog).keypressRestart, "to restart", true},
 		's': {(*Makedog).keypressSignal, "to send signal", true},
 		't': {(*Makedog).keypressMakeTargets, "to run make targets", false},
+		'x': {(*Makedog).keypressStartStop, "to start/stop", false},
 	}
 }
 
@@ -98,4 +99,13 @@ func (w *Makedog) keypressSignal() step {
 // keypressMakeTargets enters make target selection mode.
 func (w *Makedog) keypressMakeTargets() step {
 	return w.handleMakeTargetMenu()
+}
+
+// keypressStartStop starts the binary, if stopped, and stops the binary, if running.
+func (w *Makedog) keypressStartStop() step {
+	if w.processRunning() {
+		return step{stopBinary: true, stopReason: "manual stop"}
+	} else {
+		return step{startBinary: true}
+	}
 }
