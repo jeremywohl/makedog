@@ -25,6 +25,7 @@ func init() {
 		'q': {(*Makedog).keypressQuit, "to quit", false},
 		'r': {(*Makedog).keypressRestart, "to restart", true},
 		's': {(*Makedog).keypressSignal, "to send signal", true},
+		't': {(*Makedog).keypressMakeTargets, "to run make targets", false},
 	}
 }
 
@@ -92,4 +93,9 @@ func (w *Makedog) keypressRestart() step {
 // keypressSignal enters signal selection mode.
 func (w *Makedog) keypressSignal() step {
 	return w.handleSignalMenu()
+}
+
+// keypressMakeTargets enters make target selection mode.
+func (w *Makedog) keypressMakeTargets() step {
+	return w.handleMakeTargetMenu()
 }
