@@ -31,9 +31,6 @@ clean:
 test:
 	@go test -v ./src/...
 
-test-short:
-	@go test -short -v ./src/...
-
 # Demo fixtures
 
 fixture-pulse:
@@ -57,4 +54,4 @@ demo-spin: build fixture-spin
 demo-custom-signals: build fixture-sigecho
 	@$(BINARY_DIR)/$(BINARY_NAME) --config test/fixtures/makedog.toml-custom-signals $(BINARY_DIR)/test-sigecho
 
-.PHONY: all build build-linux fmt clean run test test-short fixture-pulse fixture-sigecho fixture-spin demo-pulse demo-sigecho demo-spin demo-custom-signals
+.PHONY: all build build-linux fmt clean run test demo-pulse demo-sigecho demo-spin demo-custom-signals
