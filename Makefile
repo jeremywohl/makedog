@@ -3,7 +3,7 @@ BINARY_DIR  = "bin"
 BINARY_NAME = "makedog"
 
 # Discoverables
-VERSION?   = dev
+VERSION   ?= dev
 COMMIT     = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME = $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS    = -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)"
@@ -15,12 +15,12 @@ all: build
 build: $(BINARY_DIR)/$(BINARY_NAME)
 
 $(BINARY_DIR)/$(BINARY_NAME): $(SRCS) go.mod go.sum
-	@go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME) ./src
+	go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME) ./src
 
 build-linux: $(BINARY_DIR)/$(BINARY_NAME)-linux
 
 $(BINARY_DIR)/$(BINARY_NAME)-linux: $(SRCS) go.mod go.sum
-	@GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME)-linux ./src
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME)-linux ./src
 
 fmt:
 	@go fmt ./src/...
