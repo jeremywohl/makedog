@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // keypressHandler holds a handler function and its description.
@@ -21,6 +22,7 @@ func init() {
 	defaultKeys = map[byte]keypressHandler{
 		'c': {(*Makedog).keypressClear, "to clear screen", false},
 		'h': {(*Makedog).keypressHelp, "for this help", false},
+		'k': {(*Makedog).keypressMark, "to mark log", false},
 		'm': {(*Makedog).keypressMake, "to run make", false},
 		'q': {(*Makedog).keypressQuit, "to quit", false},
 		'r': {(*Makedog).keypressRestart, "to restart", true},
@@ -59,6 +61,13 @@ func (w *Makedog) printKeypressInstructions() {
 // keypressHelp prints the help message showing available keys.
 func (w *Makedog) keypressHelp() step {
 	w.printKeypressInstructions()
+	return step{}
+}
+
+// keypressMark prints a timestamp marker line in the log output.
+func (w *Makedog) keypressMark() step {
+	timestamp := time.Now().Format("[2006-01-02 15:04:05.000]")
+	flagline("mark at "+timestamp, '-', false)
 	return step{}
 }
 
