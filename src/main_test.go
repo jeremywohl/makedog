@@ -5,10 +5,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 func TestHandleKeypress(t *testing.T) {
@@ -514,7 +519,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			os.Stdout = w
 
 			// Call _printExitDetails (internal testable function)
-			_printExitDetails(tt.state, tt.startTime, "/test/binary", tt.makedogInitiated, "")
+			_printExitDetails(tt.state, tt.startTime, time.Time{}, "/test/binary", tt.makedogInitiated, "")
 
 			// Close write end and read captured output
 			w.Close()
@@ -776,5 +781,96 @@ func TestClearSpinTracking(t *testing.T) {
 
 	if w.restartTimes != nil {
 		t.Error("Expected restartTimes to be nil after clearing")
+	}
+}
+
+// TestExternalSignalStopsChildAndExits runs a real makedog under a pty and sends
+// it an external SIGTERM while its child is producing output. Makedog must stop
+// the child and exit promptly. Guards the signal-through-monitor-loop path: a
+// handler that exits from a side goroutine instead deadlocks on outputWg.Wait
+// (the still-running child keeps the pty open) and orphans the child.
+func TestExternalSignalStopsChildAndExits(t *testing.T) {
+	dir := t.TempDir()
+
+	makedogBin := filepath.Join(dir, "makedog")
+	build := exec.Command("go", "build", "-o", makedogBin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building makedog: %v\n%s", err, out)
+	}
+
+	child := filepath.Join(dir, "chatter")
+	script := "#!/bin/sh\nwhile :; do echo tick; sleep 0.1; done\n"
+	if err := os.WriteFile(child, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(makedogBin, child)
+	cmd.Dir = dir
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("starting makedog: %v", err)
+	}
+	defer ptmx.Close()
+
+	// Drain the pty continuously; accumulate output for the start-message scan.
+	var mu sync.Mutex
+	var output []byte
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(buf)
+			mu.Lock()
+			output = append(output, buf[:n]...)
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for the start message, and extract the child pid from it. Styling
+	// underlines it per-character, so strip ANSI escapes before matching.
+	ansiRe := regexp.MustCompile("\x1b\\[[0-9;]*m")
+	pidRe := regexp.MustCompile(`pid (\d+)`)
+	var childPid int
+	deadline := time.Now().Add(5 * time.Second)
+	for childPid == 0 {
+		mu.Lock()
+		snapshot := ansiRe.ReplaceAllString(string(output), "")
+		mu.Unlock()
+
+		if m := pidRe.FindStringSubmatch(snapshot); m != nil {
+			childPid, _ = strconv.Atoi(m[1])
+			break
+		}
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			t.Fatalf("never saw start message; output:\n%s", snapshot)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signaling makedog: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("makedog exited with error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		syscall.Kill(childPid, syscall.SIGKILL)
+		t.Fatal("makedog did not exit within 5s of external SIGTERM")
+	}
+
+	// Signal 0 probes existence: the child must be gone once makedog has exited.
+	if err := syscall.Kill(childPid, 0); err == nil {
+		syscall.Kill(childPid, syscall.SIGKILL)
+		t.Errorf("child (pid %d) still running after makedog exit", childPid)
 	}
 }

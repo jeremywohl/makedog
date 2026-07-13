@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -80,6 +81,11 @@ var eventStyle = lipgloss.NewStyle().Bold(true)
 func reportEvent(format string, args ...interface{}) {
 	text := fmt.Sprintf(format, args...)
 	printf("* %s\n", eventStyle.Render(text))
+}
+
+func reportEventWithTime(t time.Time, format string, args ...interface{}) {
+	text := fmt.Sprintf(format, args...)
+	printf("%s at %s\n", eventStyle.Render("* "+text), t.Format("15:04:05.000"))
 }
 
 var errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("red"))

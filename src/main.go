@@ -77,7 +77,9 @@ type Makedog struct {
 	lastMtime    int64
 	childExit    chan error
 	keyChan      chan byte
+	extSignal    chan os.Signal
 	startTime    time.Time
+	stopTime     time.Time
 	outputWg     sync.WaitGroup
 	restartTimes []time.Time
 	config       *Config
@@ -115,15 +117,11 @@ func (w *Makedog) exitCleanly(status int) {
 	os.Exit(status)
 }
 
-// setupSignalHandlers configures handlers for INT and TERM signals.
+// setupSignalHandlers routes INT and TERM into the monitor loop, so external
+// signals follow the same stop → drain → exit sequence as a keypress quit.
 func (w *Makedog) setupSignalHandlers() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		w.exitCleanly(0)
-	}()
+	w.extSignal = make(chan os.Signal, 1)
+	signal.Notify(w.extSignal, syscall.SIGINT, syscall.SIGTERM)
 }
 
 // startBinary starts the monitored binary.
@@ -275,6 +273,8 @@ func (w *Makedog) monitor() error {
 		select {
 		case key := <-w.keyChan:
 			s = w.handleKeypress(key)
+		case sig := <-w.extSignal:
+			s = step{stopBinary: true, exitAfter: true, stopReason: "external signal " + signalName(sig.(syscall.Signal))}
 		case <-ticker.C:
 			s = w.checkFileModification()
 		case <-w.childExit:
@@ -282,7 +282,7 @@ func (w *Makedog) monitor() error {
 
 			// Check for spinning process
 			if w.checkForSpin() {
-				reportEvent("pausing for spinning process")
+				reportEventWithTime(time.Now(), "pausing for spinning process")
 				w.printKeypressInstructions()
 				println()
 				s = step{}
@@ -292,6 +292,7 @@ func (w *Makedog) monitor() error {
 		}
 
 		if s.stopBinary {
+			w.stopTime = time.Now()
 			if w.processRunning() {
 				w.stopReason = s.stopReason
 				w.stopBinary()
@@ -406,11 +407,11 @@ type processState interface {
 
 // printExitDetails handles the child process exiting.
 func (w *Makedog) printExitDetails(makedogInitiated bool) {
-	_printExitDetails(w.cmd.ProcessState, w.startTime, w.binaryPath, makedogInitiated, w.stopReason)
+	_printExitDetails(w.cmd.ProcessState, w.startTime, w.stopTime, w.binaryPath, makedogInitiated, w.stopReason)
 }
 
 // _printExitDetails handles the child process exiting (internal, testable function).
-func _printExitDetails(state processState, startTime time.Time, binaryPath string, makedogInitiated bool, stopReason string) {
+func _printExitDetails(state processState, startTime, stopTime time.Time, binaryPath string, makedogInitiated bool, stopReason string) {
 	exitCode := state.ExitCode()
 	waitStatus := state.Sys().(waitStatus)
 	sysUsage := state.SysUsage().(*syscall.Rusage)
@@ -444,7 +445,7 @@ func _printExitDetails(state processState, startTime time.Time, binaryPath strin
 	println()
 
 	if stopReason != "" {
-		reportEvent("%s", stopReason)
+		reportEventWithTime(stopTime, "%s", stopReason)
 	}
 
 	println()
