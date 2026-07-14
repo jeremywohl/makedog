@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -159,7 +160,9 @@ func (w *Makedog) startBinary() error {
 
 	reportCommand("%s", msg)
 
-	// Process output (stdout and stderr merged)
+	// Process output (stdout and stderr merged). Add before go: exitCleanly
+	// may Wait before a goroutine-side Add would run.
+	w.outputWg.Add(1)
 	go w.processOutput(ptmx)
 
 	w.cmd = cmd
@@ -176,15 +179,21 @@ func (w *Makedog) startBinary() error {
 }
 
 // processOutput reads from a pty and prints each line with a timestamp and separator.
-// Uses buffered reading since pty provides line-buffered output from child process.
+// Reads lines directly rather than through a Scanner: a Scanner's token limit would
+// silently end capture on the first oversized line. A final unterminated line still prints.
 func (w *Makedog) processOutput(reader io.Reader) {
-	w.outputWg.Add(1)
 	defer w.outputWg.Done()
 
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		timestamp := time.Now().Format("[2006-01-02 15:04:05.000]")
-		printf("%s  %s\n", timestamp, scanner.Text())
+	buffered := bufio.NewReader(reader)
+	for {
+		line, err := buffered.ReadString('\n')
+		if line = strings.TrimRight(line, "\r\n"); line != "" || err == nil {
+			timestamp := time.Now().Format("[2006-01-02 15:04:05.000]")
+			printf("%s  %s\n", timestamp, line)
+		}
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -196,12 +205,6 @@ func (w *Makedog) stopBinary() {
 
 	// Ask the child to exit gracefully.
 	_ = w.cmd.Process.Signal(syscall.SIGTERM)
-
-	// Close pty to signal EOF to processOutput goroutine
-	if w.pty != nil {
-		w.pty.Close()
-		w.pty = nil
-	}
 
 	// If the child ignores SIGTERM, escalate after a short grace period so we
 	// don't hang waiting on the exit.
@@ -222,6 +225,31 @@ func (w *Makedog) stopBinary() {
 
 	if !exited {
 		<-w.childExit
+	}
+
+	// The child is gone; let the reader drain its final output (e.g. graceful
+	// shutdown messages) before the pty closes.
+	w.drainOutput()
+}
+
+// drainOutput waits briefly for the output reader to finish, then closes the pty.
+// The wait is bounded: orphaned descendants of the child can hold the pty open
+// indefinitely, and we won't hang on them.
+func (w *Makedog) drainOutput() {
+	done := make(chan struct{})
+	go func() {
+		w.outputWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+	}
+
+	if w.pty != nil {
+		w.pty.Close()
+		w.pty = nil
 	}
 }
 
@@ -257,7 +285,10 @@ func (w *Makedog) monitor() error {
 		buf := make([]byte, 1)
 		for {
 			n, err := os.Stdin.Read(buf)
-			if err != nil || n == 0 {
+			if err != nil {
+				return // stdin closed; no further keypresses possible
+			}
+			if n == 0 {
 				continue
 			}
 			w.keyChan <- buf[0]
@@ -278,6 +309,7 @@ func (w *Makedog) monitor() error {
 		case <-ticker.C:
 			s = w.checkFileModification()
 		case <-w.childExit:
+			w.drainOutput()
 			w.printExitDetails(false)
 
 			// Check for spinning process
@@ -297,6 +329,15 @@ func (w *Makedog) monitor() error {
 				w.stopReason = s.stopReason
 				w.stopBinary()
 				w.printExitDetails(true)
+			} else if w.childExit != nil {
+				// The child may have exited on its own an instant before this
+				// step; report the buffered exit rather than dropping it.
+				select {
+				case <-w.childExit:
+					w.drainOutput()
+					w.printExitDetails(false)
+				default:
+				}
 			}
 		}
 
@@ -309,7 +350,9 @@ func (w *Makedog) monitor() error {
 		}
 
 		if s.startBinary {
-			w.startBinary()
+			if err := w.startBinary(); err != nil {
+				reportError("failed to start %s: %v", w.binaryPath, err)
+			}
 		}
 	}
 }
