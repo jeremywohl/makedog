@@ -1,21 +1,16 @@
+// Makedog: watch a server binary and restart it on change, with interactive
+// controls, signals, make targets, and per-run reporting.
 package main
 
 import (
-	"bufio"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"regexp"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
-
-	"github.com/creack/pty"
 )
 
 func main() {
@@ -73,18 +68,13 @@ func main() {
 // Makedog manages the lifecycle of watching and restarting a binary.
 type Makedog struct {
 	binaryPath   string
-	cmd          *exec.Cmd
-	pty          *os.File
+	run          *run // current or most recent run; nil before the first start
+	runCount     int
 	lastMtime    int64
-	childExit    chan error
 	keyChan      chan byte
 	extSignal    chan os.Signal
-	startTime    time.Time
-	stopTime     time.Time
-	outputWg     sync.WaitGroup
 	restartTimes []time.Time
 	config       *Config
-	stopReason   string
 }
 
 // NewMakedog creates a new Makedog instance for the given binary path.
@@ -113,7 +103,9 @@ func (w *Makedog) Run() error {
 
 // exitCleanly waits for output to complete, performs cleanup, and exits the program.
 func (w *Makedog) exitCleanly(status int) {
-	w.outputWg.Wait()
+	if w.run != nil {
+		w.run.drainOutput()
+	}
 	restoreTerm()
 	os.Exit(status)
 }
@@ -125,7 +117,7 @@ func (w *Makedog) setupSignalHandlers() {
 	signal.Notify(w.extSignal, syscall.SIGINT, syscall.SIGTERM)
 }
 
-// startBinary starts the monitored binary.
+// startBinary begins a new run of the monitored binary.
 func (w *Makedog) startBinary() error {
 	var err error
 	w.lastMtime, err = w.getMtime()
@@ -133,67 +125,14 @@ func (w *Makedog) startBinary() error {
 		return err
 	}
 
-	cmd := exec.Command(w.binaryPath)
-
-	w.startTime = time.Now()
-	w.stopReason = ""
-
-	// Start with pty for real-time output
-	ptmx, err := pty.Start(cmd)
+	r, err := startRun(w.binaryPath, w.runCount+1)
 	if err != nil {
 		return err
 	}
 
-	// Collect metadata
-	binaryHash, _ := getBinaryHash(w.binaryPath)
-	gitBranch, gitCommit, _ := getGitInfo()
-
-	// Build the start message
-	msg := fmt.Sprintf("start 135 %s (pid %d", w.binaryPath, cmd.Process.Pid)
-	if binaryHash != "" {
-		msg += fmt.Sprintf(", hash %s", binaryHash[:7])
-	}
-	if gitBranch != "" && gitCommit != "" {
-		msg += fmt.Sprintf(", git %s/%s", gitBranch, gitCommit[:7])
-	}
-	msg += ")"
-
-	out.Command("%s", msg)
-
-	// Process output (stdout and stderr merged). Add before go: exitCleanly
-	// may Wait before a goroutine-side Add would run.
-	w.outputWg.Add(1)
-	go w.processOutput(ptmx)
-
-	w.cmd = cmd
-	w.pty = ptmx
-	w.childExit = make(chan error, 1)
-
-	// Monitor process exit
-	go func() {
-		err := cmd.Wait()
-		w.childExit <- err
-	}()
-
+	w.runCount++
+	w.run = r
 	return nil
-}
-
-// processOutput reads from a pty and prints each line with a timestamp and separator.
-// Reads lines directly rather than through a Scanner: a Scanner's token limit would
-// silently end capture on the first oversized line. A final unterminated line still prints.
-func (w *Makedog) processOutput(reader io.Reader) {
-	defer w.outputWg.Done()
-
-	buffered := bufio.NewReader(reader)
-	for {
-		line, err := buffered.ReadString('\n')
-		if line = strings.TrimRight(line, "\r\n"); line != "" || err == nil {
-			out.ChildLine(time.Now(), line)
-		}
-		if err != nil {
-			return
-		}
-	}
 }
 
 // stopBinary terminates the monitored binary.
@@ -201,60 +140,21 @@ func (w *Makedog) stopBinary() {
 	if !w.processRunning() {
 		return
 	}
-
-	// Ask the child to exit gracefully.
-	_ = w.cmd.Process.Signal(syscall.SIGTERM)
-
-	// If the child ignores SIGTERM, escalate after a short grace period so we
-	// don't hang waiting on the exit.
-	const gracefulShutdownTimeout = 2 * time.Second
-	timer := time.NewTimer(gracefulShutdownTimeout)
-	defer timer.Stop()
-
-	var exited bool
-	select {
-	case <-w.childExit:
-		exited = true
-	case <-timer.C:
-		out.Event("process unresponsive after SIGTERM, sending SIGKILL")
-		if err := w.cmd.Process.Signal(syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			printf("error sending SIGKILL: %v\n", err)
-		}
-	}
-
-	if !exited {
-		<-w.childExit
-	}
-
-	// The child is gone; let the reader drain its final output (e.g. graceful
-	// shutdown messages) before the pty closes.
-	w.drainOutput()
+	w.run.stop()
 }
 
-// drainOutput waits briefly for the output reader to finish, then closes the pty.
-// The wait is bounded: orphaned descendants of the child can hold the pty open
-// indefinitely, and we won't hang on them.
-func (w *Makedog) drainOutput() {
-	done := make(chan struct{})
-	go func() {
-		w.outputWg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second):
+// exitChan returns the current run's exit channel, or nil (never ready) when
+// there is no run.
+func (w *Makedog) exitChan() chan error {
+	if w.run == nil {
+		return nil
 	}
-
-	if w.pty != nil {
-		w.pty.Close()
-		w.pty = nil
-	}
+	return w.run.exit
 }
 
 // processRunning reports whether the child process is currently active.
 func (w *Makedog) processRunning() bool {
-	return w.cmd != nil && w.cmd.Process != nil && w.cmd.ProcessState == nil
+	return w.run != nil && w.run.cmd.Process != nil && w.run.cmd.ProcessState == nil
 }
 
 // getMtime retrieves the modification time of the binary.
@@ -307,8 +207,9 @@ func (w *Makedog) monitor() error {
 			s = step{stopBinary: true, exitAfter: true, stopReason: "external signal " + signalName(sig.(syscall.Signal))}
 		case <-ticker.C:
 			s = w.checkFileModification()
-		case <-w.childExit:
-			w.drainOutput()
+		case <-w.exitChan():
+			w.run.stopTime = time.Now()
+			w.run.drainOutput()
 			w.printExitDetails(false)
 
 			// Check for spinning process
@@ -323,17 +224,18 @@ func (w *Makedog) monitor() error {
 		}
 
 		if s.stopBinary {
-			w.stopTime = time.Now()
 			if w.processRunning() {
-				w.stopReason = s.stopReason
+				w.run.stopTime = time.Now()
+				w.run.stopReason = s.stopReason
 				w.stopBinary()
 				w.printExitDetails(true)
-			} else if w.childExit != nil {
+			} else if w.run != nil {
 				// The child may have exited on its own an instant before this
 				// step; report the buffered exit rather than dropping it.
 				select {
-				case <-w.childExit:
-					w.drainOutput()
+				case <-w.run.exit:
+					w.run.stopTime = time.Now()
+					w.run.drainOutput()
 					w.printExitDetails(false)
 				default:
 				}
@@ -398,7 +300,7 @@ func (w *Makedog) checkFileModification() step {
 // Clears spin tracking if process ran successfully (≥10 seconds).
 func (w *Makedog) checkForSpin() bool {
 	// Check if process ran long enough to be considered successful
-	runDuration := time.Since(w.startTime)
+	runDuration := time.Since(w.run.startTime)
 	if runDuration >= 10*time.Second {
 		w.clearSpinTracking()
 		return false
@@ -449,11 +351,12 @@ type processState interface {
 
 // printExitDetails handles the child process exiting.
 func (w *Makedog) printExitDetails(makedogInitiated bool) {
-	_printExitDetails(w.cmd.ProcessState, w.startTime, w.stopTime, w.binaryPath, makedogInitiated, w.stopReason)
+	r := w.run
+	_printExitDetails(r.cmd.ProcessState, r.number, r.startTime, r.stopTime, w.binaryPath, makedogInitiated, r.stopReason)
 }
 
 // _printExitDetails handles the child process exiting (internal, testable function).
-func _printExitDetails(state processState, startTime, stopTime time.Time, binaryPath string, makedogInitiated bool, stopReason string) {
+func _printExitDetails(state processState, number int, startTime, stopTime time.Time, binaryPath string, makedogInitiated bool, stopReason string) {
 	exitCode := state.ExitCode()
 	waitStatus := state.Sys().(waitStatus)
 	sysUsage := state.SysUsage().(*syscall.Rusage)
@@ -473,10 +376,9 @@ func _printExitDetails(state processState, startTime, stopTime time.Time, binary
 		}
 	}
 
-	runnum := 135
 	out.Command(
 		"stop  %d %s [%s%s memory, %s cpu time, %s wall time]",
-		runnum,
+		number,
 		binaryPath,
 		exitDesc,
 		formatMemory(sysUsage.Maxrss),

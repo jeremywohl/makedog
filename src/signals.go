@@ -135,8 +135,7 @@ func printSignalMenu(items []signalMenuItem) {
 
 // handleSignalMenu displays the signal menu and handles user selection.
 func (w *Makedog) handleSignalMenu() step {
-	// Check if process is running
-	if w.cmd == nil || w.cmd.Process == nil {
+	if !w.processRunning() {
 		printf("no process running\n")
 		return step{}
 	}
@@ -159,7 +158,7 @@ func (w *Makedog) handleSignalMenu() step {
 
 // sendSignal sends a signal to the child process.
 func (w *Makedog) sendSignal(name string, sig syscall.Signal) {
-	if w.cmd == nil || w.cmd.Process == nil {
+	if !w.processRunning() {
 		printf("no process running\n")
 		return
 	}
@@ -168,9 +167,9 @@ func (w *Makedog) sendSignal(name string, sig syscall.Signal) {
 	if signalName(sig) != name {
 		nativeName = " (" + signalName(sig) + ")"
 	}
-	out.Event("sending %s%s to pid %d", name, nativeName, w.cmd.Process.Pid)
+	out.Event("sending %s%s to pid %d", name, nativeName, w.run.cmd.Process.Pid)
 
-	err := w.cmd.Process.Signal(sig)
+	err := w.run.cmd.Process.Signal(sig)
 	if err != nil {
 		printf("error sending signal: %v\n", err)
 	}

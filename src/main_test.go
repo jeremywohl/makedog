@@ -119,9 +119,13 @@ func TestHandleKeypressRestart(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := tt.setupProcess(t)
+			var r *run
+			if cmd != nil {
+				r = &run{cmd: cmd}
+			}
 			w := &Makedog{
 				binaryPath:   "/bin/echo",
-				cmd:          cmd,
+				run:          r,
 				restartTimes: []time.Time{time.Now()},
 			}
 
@@ -196,9 +200,13 @@ func TestHandleKeypressStartStop(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := tt.setupProcess(t)
+			var r *run
+			if cmd != nil {
+				r = &run{cmd: cmd}
+			}
 			w := &Makedog{
 				binaryPath: "/bin/echo",
-				cmd:        cmd,
+				run:        r,
 			}
 
 			s := w.handleKeypress('x')
@@ -340,11 +348,11 @@ done
 	}
 
 	// Verify process is running
-	if w.cmd == nil || w.cmd.Process == nil {
+	if w.run == nil || w.run.cmd.Process == nil {
 		t.Fatal("Expected process to be running")
 	}
 
-	pid := w.cmd.Process.Pid
+	pid := w.run.cmd.Process.Pid
 
 	// Verify the process exists
 	process, err := os.FindProcess(pid)
@@ -520,7 +528,7 @@ func TestHandleProcessExitMessage(t *testing.T) {
 			os.Stdout = w
 
 			// Call _printExitDetails (internal testable function)
-			_printExitDetails(tt.state, tt.startTime, time.Time{}, "/test/binary", tt.makedogInitiated, "")
+			_printExitDetails(tt.state, 135, tt.startTime, time.Time{}, "/test/binary", tt.makedogInitiated, "")
 
 			// Close write end and read captured output
 			w.Close()
@@ -614,8 +622,10 @@ func TestHandleProcessExit(t *testing.T) {
 			// Create makedog instance
 			makedog := &Makedog{
 				binaryPath: tt.cmdArgs[0],
-				cmd:        cmd,
-				startTime:  time.Now().Add(-2 * time.Second), // Simulate 2s runtime
+				run: &run{
+					cmd:       cmd,
+					startTime: time.Now().Add(-2 * time.Second), // Simulate 2s runtime
+				},
 			}
 
 			// Call the method (which calls _printExitDetails internally)
@@ -670,7 +680,7 @@ func TestCheckForSpin(t *testing.T) {
 	t.Run("less than 3 restarts", func(t *testing.T) {
 		w := &Makedog{
 			binaryPath: "/bin/echo",
-			startTime:  time.Now(),
+			run:        &run{startTime: time.Now()},
 		}
 
 		// First restart
@@ -687,7 +697,7 @@ func TestCheckForSpin(t *testing.T) {
 	t.Run("3 rapid restarts within 5 seconds", func(t *testing.T) {
 		w := &Makedog{
 			binaryPath: "/bin/echo",
-			startTime:  time.Now(),
+			run:        &run{startTime: time.Now()},
 		}
 
 		// Simulate 3 rapid restarts
@@ -701,7 +711,7 @@ func TestCheckForSpin(t *testing.T) {
 	t.Run("3 restarts spread over more than 5 seconds", func(t *testing.T) {
 		w := &Makedog{
 			binaryPath: "/bin/echo",
-			startTime:  time.Now(),
+			run:        &run{startTime: time.Now()},
 		}
 
 		// First restart at T-6s
@@ -719,7 +729,7 @@ func TestCheckForSpin(t *testing.T) {
 	t.Run("sliding window keeps only last 5", func(t *testing.T) {
 		w := &Makedog{
 			binaryPath: "/bin/echo",
-			startTime:  time.Now(),
+			run:        &run{startTime: time.Now()},
 		}
 
 		// Add 7 restarts
@@ -735,7 +745,7 @@ func TestCheckForSpin(t *testing.T) {
 	t.Run("old restarts don't count", func(t *testing.T) {
 		w := &Makedog{
 			binaryPath: "/bin/echo",
-			startTime:  time.Now(),
+			run:        &run{startTime: time.Now()},
 		}
 
 		// Add 2 old restarts (>5 seconds ago)
@@ -754,7 +764,7 @@ func TestCheckForSpin(t *testing.T) {
 	t.Run("successful run clears spin tracking", func(t *testing.T) {
 		w := &Makedog{
 			binaryPath: "/bin/echo",
-			startTime:  time.Now().Add(-15 * time.Second), // Process ran for 15 seconds
+			run:        &run{startTime: time.Now().Add(-15 * time.Second)}, // ran for 15 seconds
 		}
 
 		// Add some restart times
