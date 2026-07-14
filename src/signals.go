@@ -142,14 +142,14 @@ func (w *Makedog) handleSignalMenu() step {
 	}
 
 	// Build and print signal menu
-	reportEvent("Choose a signal (or ESC to cancel)")
+	out.Event("Choose a signal (or ESC to cancel)")
 	items := buildSignalMenu(w.config)
 	printSignalMenu(items)
 
 	// Handle user selection
 	selected, ok := handleMenuKeySelection(items, w.keyChan)
 	if !ok {
-		reportEvent("signal cancelled")
+		out.Event("signal cancelled")
 		return step{}
 	}
 
@@ -168,7 +168,7 @@ func (w *Makedog) sendSignal(name string, sig syscall.Signal) {
 	if signalName(sig) != name {
 		nativeName = " (" + signalName(sig) + ")"
 	}
-	reportEvent("sending %s%s to pid %d", name, nativeName, w.cmd.Process.Pid)
+	out.Event("sending %s%s to pid %d", name, nativeName, w.cmd.Process.Pid)
 
 	err := w.cmd.Process.Signal(sig)
 	if err != nil {

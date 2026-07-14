@@ -178,7 +178,7 @@ func (w *Makedog) handleMakeTargetMenu() step {
 	// Parse Makefile targets
 	targets, err := parseMakeTargets("Makefile")
 	if err != nil {
-		reportError("failed to read Makefile: %v", err)
+		out.Error("failed to read Makefile: %v", err)
 		return step{}
 	}
 
@@ -188,14 +188,14 @@ func (w *Makedog) handleMakeTargetMenu() step {
 	}
 
 	// Build and print make target menu
-	reportEvent("Choose a make target (or ESC to cancel)")
+	out.Event("Choose a make target (or ESC to cancel)")
 	items := buildMakeTargetMenu(targets)
 	printMakeTargetMenu(items)
 
 	// Handle user selection
 	selected, ok := handleMenuKeySelection(items, w.keyChan)
 	if !ok {
-		reportEvent("make target cancelled")
+		out.Event("make target cancelled")
 		return step{}
 	}
 

@@ -158,7 +158,7 @@ func (w *Makedog) startBinary() error {
 	}
 	msg += ")"
 
-	reportCommand("%s", msg)
+	out.Command("%s", msg)
 
 	// Process output (stdout and stderr merged). Add before go: exitCleanly
 	// may Wait before a goroutine-side Add would run.
@@ -188,8 +188,7 @@ func (w *Makedog) processOutput(reader io.Reader) {
 	for {
 		line, err := buffered.ReadString('\n')
 		if line = strings.TrimRight(line, "\r\n"); line != "" || err == nil {
-			timestamp := time.Now().Format("[2006-01-02 15:04:05.000]")
-			printf("%s  %s\n", timestamp, line)
+			out.ChildLine(time.Now(), line)
 		}
 		if err != nil {
 			return
@@ -217,7 +216,7 @@ func (w *Makedog) stopBinary() {
 	case <-w.childExit:
 		exited = true
 	case <-timer.C:
-		reportEvent("process unresponsive after SIGTERM, sending SIGKILL")
+		out.Event("process unresponsive after SIGTERM, sending SIGKILL")
 		if err := w.cmd.Process.Signal(syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			printf("error sending SIGKILL: %v\n", err)
 		}
@@ -314,7 +313,7 @@ func (w *Makedog) monitor() error {
 
 			// Check for spinning process
 			if w.checkForSpin() {
-				reportEventWithTime(time.Now(), "pausing for spinning process")
+				out.EventAt(time.Now(), "pausing for spinning process")
 				w.printKeypressInstructions()
 				println()
 				s = step{}
@@ -351,7 +350,7 @@ func (w *Makedog) monitor() error {
 
 		if s.startBinary {
 			if err := w.startBinary(); err != nil {
-				reportError("failed to start %s: %v", w.binaryPath, err)
+				out.Error("failed to start %s: %v", w.binaryPath, err)
 			}
 		}
 	}
@@ -475,7 +474,7 @@ func _printExitDetails(state processState, startTime, stopTime time.Time, binary
 	}
 
 	runnum := 135
-	reportCommand(
+	out.Command(
 		"stop  %d %s [%s%s memory, %s cpu time, %s wall time]",
 		runnum,
 		binaryPath,
@@ -488,7 +487,7 @@ func _printExitDetails(state processState, startTime, stopTime time.Time, binary
 	println()
 
 	if stopReason != "" {
-		reportEventWithTime(stopTime, "%s", stopReason)
+		out.EventAt(stopTime, "%s", stopReason)
 	}
 
 	println()

@@ -10,9 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 )
@@ -67,32 +65,6 @@ func flagline(text string, fill rune, tight bool) {
 
 func line() {
 	flagline("", '-', true)
-}
-
-var commandStyle = lipgloss.NewStyle().Underline(true)
-
-func reportCommand(format string, args ...interface{}) {
-	text := fmt.Sprintf(format, args...)
-	printf("--> %s\n", commandStyle.Render(text))
-}
-
-var eventStyle = lipgloss.NewStyle().Bold(true)
-
-func reportEvent(format string, args ...interface{}) {
-	text := fmt.Sprintf(format, args...)
-	printf("* %s\n", eventStyle.Render(text))
-}
-
-func reportEventWithTime(t time.Time, format string, args ...interface{}) {
-	text := fmt.Sprintf(format, args...)
-	printf("%s at %s\n", eventStyle.Render("* "+text), t.Format("15:04:05.000"))
-}
-
-var errorStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("red"))
-
-func reportError(format string, args ...interface{}) {
-	text := fmt.Sprintf(format, args...)
-	printf("! %s\n", errorStyle.Render(text))
 }
 
 // printf prints formatted output with proper line endings for raw terminal mode.
@@ -183,7 +155,7 @@ func runCommand(name string, args ...string) error {
 	if len(args) != 0 {
 		text += " " + strings.Join(args, " ")
 	}
-	reportCommand("%s", text)
+	out.Command("%s", text)
 	line()
 
 	cmd := exec.Command(name, args...)
@@ -191,18 +163,18 @@ func runCommand(name string, args ...string) error {
 	// Get pipes
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		reportError("failed to create stdout pipe: %v", err)
+		out.Error("failed to create stdout pipe: %v", err)
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		reportError("failed to create stderr pipe: %v", err)
+		out.Error("failed to create stderr pipe: %v", err)
 		return err
 	}
 
 	// Start command
 	if err := cmd.Start(); err != nil {
-		reportError("failed to start command: %v", err)
+		out.Error("failed to start command: %v", err)
 		return err
 	}
 
@@ -227,7 +199,7 @@ func runCommand(name string, args ...string) error {
 	line()
 
 	if err != nil {
-		reportError("%s failed: %v", name, err)
+		out.Error("%s failed: %v", name, err)
 	}
 
 	return err
