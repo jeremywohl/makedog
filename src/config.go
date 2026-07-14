@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -20,7 +21,8 @@ type Config struct {
 
 // loadConfig attempts to load config from the specified path, or .makedog.toml from
 // the current directory if configPath is empty.
-// Returns an empty config if the file doesn't exist or cannot be parsed.
+// Returns an empty config if the file doesn't exist; a parse failure warns and
+// falls back to defaults rather than aborting the run.
 func loadConfig(configPath string) *Config {
 	config := &Config{}
 
@@ -37,7 +39,7 @@ func loadConfig(configPath string) *Config {
 
 	// Parse the TOML file
 	if _, err := toml.DecodeFile(path, config); err != nil {
-		// If we can't parse it, just return empty config and use defaults
+		fmt.Fprintf(os.Stderr, "makedog: ignoring config %s: %v\n", path, err)
 		return &Config{}
 	}
 
