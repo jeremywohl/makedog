@@ -121,6 +121,7 @@ type Makedog struct {
 	run          *run         // current or most recent run; nil before the first start
 	runCount     int          // last run number; session-local fallback when store is nil
 	store        *binaryStore // durable run archive, nil when unavailable
+	retention    retentionPolicy
 	lastMtime    int64
 	keyChan      chan byte
 	extSignal    chan os.Signal
@@ -140,6 +141,7 @@ func NewMakedog(binaryPath, configPath string) *Makedog {
 	if w.store, err = openBinaryStore(binaryPath); err != nil {
 		fmt.Fprintf(os.Stderr, "makedog: run logs disabled: %v\n", err)
 	}
+	w.retention = retentionFromConfig(w.config.Logs)
 
 	w.setupSignalHandlers()
 
@@ -153,6 +155,10 @@ func (w *Makedog) Run() error {
 
 	if err := w.startBinary(); err != nil {
 		return err
+	}
+
+	if w.store != nil {
+		go w.maintainStore()
 	}
 
 	return w.monitor()

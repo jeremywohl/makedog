@@ -8,6 +8,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/klauspost/compress/zstd"
 )
 
 // storeMeta identifies a lineage, written alongside its runs.
@@ -179,24 +181,60 @@ func (s *binaryStore) beginRun() (int, *os.File, error) {
 	return number, f, nil
 }
 
-// runNumbers lists the lineage's recorded runs, ascending.
+// runNumbers lists the lineage's recorded runs, ascending, across plain and
+// compressed forms.
 func (s *binaryStore) runNumbers() ([]int, error) {
 	entries, err := os.ReadDir(s.runsDir())
 	if err != nil {
 		return nil, err
 	}
+	seen := make(map[int]bool)
 	var numbers []int
 	for _, e := range entries {
-		name, ok := strings.CutSuffix(e.Name(), ".jsonl")
+		name := strings.TrimSuffix(e.Name(), ".zst")
+		name, ok := strings.CutSuffix(name, ".jsonl")
 		if !ok {
 			continue
 		}
-		if n, err := strconv.Atoi(name); err == nil && n > 0 {
+		if n, err := strconv.Atoi(name); err == nil && n > 0 && !seen[n] {
+			seen[n] = true
 			numbers = append(numbers, n)
 		}
 	}
 	sort.Ints(numbers)
 	return numbers, nil
+}
+
+// openRun opens a run log for reading, transparently decompressing. The
+// compressed flag also means the run is necessarily sealed: maintenance only
+// compresses runs past the protected window.
+func (s *binaryStore) openRun(number int) (r io.ReadCloser, compressed bool, err error) {
+	plain := s.runPath(number)
+	if f, err := os.Open(plain); err == nil {
+		return f, false, nil
+	}
+	f, err := os.Open(plain + ".zst")
+	if err != nil {
+		return nil, false, err
+	}
+	zr, err := zstd.NewReader(f)
+	if err != nil {
+		f.Close()
+		return nil, false, err
+	}
+	return &zstRunReader{Reader: zr, dec: zr, file: f}, true, nil
+}
+
+// zstRunReader bundles a zstd decoder with its underlying file for Close.
+type zstRunReader struct {
+	io.Reader
+	dec  *zstd.Decoder
+	file *os.File
+}
+
+func (z *zstRunReader) Close() error {
+	z.dec.Close()
+	return z.file.Close()
 }
 
 // lastActivity reports when the lineage's newest run file changed.
@@ -205,9 +243,12 @@ func (s *binaryStore) lastActivity() time.Time {
 	if err != nil || len(numbers) == 0 {
 		return time.Time{}
 	}
-	info, err := os.Stat(s.runPath(numbers[len(numbers)-1]))
+	path := s.runPath(numbers[len(numbers)-1])
+	info, err := os.Stat(path)
 	if err != nil {
-		return time.Time{}
+		if info, err = os.Stat(path + ".zst"); err != nil {
+			return time.Time{}
+		}
 	}
 	return info.ModTime()
 }

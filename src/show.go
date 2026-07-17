@@ -146,7 +146,7 @@ func showMain(refArg string, args []string) {
 		fatal("%v", err)
 	}
 
-	status, err := showRun(store.runPath(number), opts)
+	status, err := showRun(store, number, opts)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -173,7 +173,7 @@ func nextMain(args []string) {
 		os.Exit(2)
 	}
 
-	status, err := showRun(store.runPath(number), opts)
+	status, err := showRun(store, number, opts)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -212,7 +212,7 @@ func tailMain(args []string) {
 		}
 		firstAttach = false
 
-		outcome, err := streamRun(store.runPath(current), runOpts)
+		outcome, err := streamRun(store, current, runOpts)
 		if err != nil {
 			fatal("%v", err)
 		}
@@ -284,8 +284,8 @@ type recordReader struct {
 	pending []byte
 }
 
-func newRecordReader(f *os.File) *recordReader {
-	return &recordReader{r: bufio.NewReader(f)}
+func newRecordReader(r io.Reader) *recordReader {
+	return &recordReader{r: bufio.NewReader(r)}
 }
 
 // next returns the next complete line, or io.EOF when no full line is
@@ -335,9 +335,9 @@ func trimBacklog(all []logLine, n int) []logLine {
 // showRun replays a run log per opts, returning the process exit status:
 // 0 on success or match, 1 when the run ends before an --until match, 2 on
 // timeout. Snapshot mode pages and always succeeds.
-func showRun(path string, opts showOptions) (int, error) {
+func showRun(store *binaryStore, number int, opts showOptions) (int, error) {
 	if !opts.follow {
-		f, err := os.Open(path)
+		f, _, err := store.openRun(number)
 		if err != nil {
 			return 1, err
 		}
@@ -350,7 +350,7 @@ func showRun(path string, opts showOptions) (int, error) {
 		})
 	}
 
-	outcome, err := streamRun(path, opts)
+	outcome, err := streamRun(store, number, opts)
 	if err != nil {
 		return 1, err
 	}
@@ -369,8 +369,8 @@ func showRun(path string, opts showOptions) (int, error) {
 
 // streamRun renders a run's backlog and follows it to an outcome, honoring
 // --until within the backlog itself so an already-passed match still counts.
-func streamRun(path string, opts showOptions) (followOutcome, error) {
-	f, err := os.Open(path)
+func streamRun(store *binaryStore, number int, opts showOptions) (followOutcome, error) {
+	f, compressed, err := store.openRun(number)
 	if err != nil {
 		return followSealed, err
 	}
@@ -383,7 +383,7 @@ func streamRun(path string, opts showOptions) (followOutcome, error) {
 	if len(all) > 0 && all[0].rec.T == recMeta {
 		pid = all[0].rec.Pid
 	}
-	sealed := len(all) > 0 && all[len(all)-1].rec.T == recExit
+	sealed := compressed || (len(all) > 0 && all[len(all)-1].rec.T == recExit)
 
 	for _, l := range trimBacklog(all, opts.lastN) {
 		renderLine(os.Stdout, l, opts)
@@ -523,7 +523,7 @@ func runsMain(args []string) {
 
 	summaries := make([]runSummary, 0, len(numbers))
 	for _, n := range numbers {
-		summaries = append(summaries, summarizeRun(store.runPath(n), n))
+		summaries = append(summaries, summarizeRun(store, n))
 	}
 
 	if *jsonOut {
@@ -549,11 +549,11 @@ func runsMain(args []string) {
 	tw.Flush()
 }
 
-// summarizeRun builds a run's summary from its header and trailer records,
-// without scanning the middle of the log.
-func summarizeRun(path string, number int) runSummary {
+// summarizeRun builds a run's summary from its header and trailer records —
+// without scanning the middle for plain logs; compressed ones stream whole.
+func summarizeRun(store *binaryStore, number int) runSummary {
 	s := runSummary{Run: number, Exit: "?"}
-	first, last, err := firstAndLastLines(path)
+	first, last, err := firstAndLastLines(store, number)
 	if err != nil {
 		return s
 	}
@@ -594,15 +594,34 @@ func summarizeRun(path string, number int) runSummary {
 	return s
 }
 
-// firstAndLastLines reads a log's opening line and trailing complete line
-// without scanning the middle. A partial trailing line (a record mid-write)
-// is ignored.
-func firstAndLastLines(path string) (string, string, error) {
-	f, err := os.Open(path)
+// firstAndLastLines reads a log's opening line and trailing complete line —
+// by seeking for plain files, by streaming for compressed ones. A partial
+// trailing line (a record mid-write) is ignored.
+func firstAndLastLines(store *binaryStore, number int) (string, string, error) {
+	r, compressed, err := store.openRun(number)
 	if err != nil {
 		return "", "", err
 	}
-	defer f.Close()
+	defer r.Close()
+
+	if compressed {
+		br := bufio.NewReader(r)
+		var first, last string
+		for {
+			line, err := br.ReadString('\n')
+			if line = strings.TrimRight(line, "\n"); line != "" && err == nil {
+				if first == "" {
+					first = line
+				}
+				last = line
+			}
+			if err != nil {
+				return first, last, nil
+			}
+		}
+	}
+
+	f := r.(*os.File)
 
 	first, err := bufio.NewReader(f).ReadString('\n')
 	if err != nil && first == "" {

@@ -4,7 +4,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -142,25 +141,37 @@ func TestResolveRef(t *testing.T) {
 }
 
 // TestFirstAndLastLines checks header/trailer extraction, including a partial
-// trailing line as left by a record mid-write.
+// trailing line as left by a record mid-write, in both plain and compressed
+// forms.
 func TestFirstAndLastLines(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "run.jsonl")
+	s := &binaryStore{dir: t.TempDir()}
+	if err := os.MkdirAll(s.runsDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	content := `{"t":"meta","run":7}` + "\n" +
 		`{"t":"line","s":"hi"}` + "\n" +
 		`{"t":"exit","reason":"quit"}` + "\n" +
 		`{"t":"line","s":"partial` // no newline: mid-write
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(s.runPath(7), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	first, last, err := firstAndLastLines(path)
-	if err != nil {
+	check := func(form string) {
+		first, last, err := firstAndLastLines(s, 7)
+		if err != nil {
+			t.Fatalf("%s: %v", form, err)
+		}
+		if first != `{"t":"meta","run":7}` {
+			t.Errorf("%s: first = %q", form, first)
+		}
+		if last != `{"t":"exit","reason":"quit"}` {
+			t.Errorf("%s: last = %q", form, last)
+		}
+	}
+	check("plain")
+
+	if err := compressRun(s.runPath(7)); err != nil {
 		t.Fatal(err)
 	}
-	if first != `{"t":"meta","run":7}` {
-		t.Errorf("first = %q", first)
-	}
-	if last != `{"t":"exit","reason":"quit"}` {
-		t.Errorf("last = %q", last)
-	}
+	check("compressed")
 }
