@@ -39,6 +39,7 @@ func usage() {
 	printStderr("%s\n", boldUnderStyle.Render("Read options (show, next, tail):"))
 	printOption("-f, --follow", "Keep streaming until the run exits (show)")
 	printOption("-n <count>", "Only the last N records")
+	printOption("--since <age>", "Only records within this age, like 30s or 5m (show)")
 	printOption("--until <regex>", "Stream until a line matches: exit 0 matched, 1 run ended first")
 	printOption("--timeout <dur>", "Give up after this duration (e.g. 30s), exit 2")
 	printStderr("\n")

@@ -67,6 +67,7 @@ type showOptions struct {
 	lastN    int
 	json     bool
 	plain    bool
+	since    time.Time      // render only records from this instant on; zero means all
 	until    *regexp.Regexp // stop following on a matching payload; implies follow
 	deadline time.Time      // stop following at this instant; zero means never
 }
@@ -134,6 +135,7 @@ func showMain(refArg string, args []string) {
 	rf.fs.BoolVar(&opts.follow, "f", false, "follow output as it arrives")
 	rf.fs.BoolVar(&opts.follow, "follow", false, "follow output as it arrives")
 	rf.fs.IntVar(&opts.lastN, "n", 0, "only the last N records")
+	since := rf.fs.String("since", "", "only records within this age, like 30s or 5m")
 
 	ref, ok := parseRunRef(refArg)
 	if !ok {
@@ -141,6 +143,13 @@ func showMain(refArg string, args []string) {
 	}
 
 	store := rf.parse(args, &opts)
+	if *since != "" {
+		age, err := parseAge(*since)
+		if err != nil {
+			fatal("bad --since: %v", err)
+		}
+		opts.since = time.Now().Add(-age)
+	}
 	number, err := store.resolveRef(ref)
 	if err != nil {
 		fatal("%v", err)
@@ -332,6 +341,20 @@ func trimBacklog(all []logLine, n int) []logLine {
 	return all
 }
 
+// visibleBacklog applies the --since window, then the -n cap.
+func visibleBacklog(all []logLine, opts showOptions) []logLine {
+	if !opts.since.IsZero() {
+		kept := all[:0:0]
+		for _, l := range all {
+			if !l.rec.TS.Before(opts.since) {
+				kept = append(kept, l)
+			}
+		}
+		all = kept
+	}
+	return trimBacklog(all, opts.lastN)
+}
+
 // showRun replays a run log per opts, returning the process exit status:
 // 0 on success or match, 1 when the run ends before an --until match, 2 on
 // timeout. Snapshot mode pages and always succeeds.
@@ -342,7 +365,7 @@ func showRun(store *binaryStore, number int, opts showOptions) (int, error) {
 			return 1, err
 		}
 		defer f.Close()
-		backlog := trimBacklog(readBacklog(newRecordReader(f)), opts.lastN)
+		backlog := visibleBacklog(readBacklog(newRecordReader(f)), opts)
 		return 0, page(func(w io.Writer) {
 			for _, l := range backlog {
 				renderLine(w, l, opts)
@@ -385,7 +408,7 @@ func streamRun(store *binaryStore, number int, opts showOptions) (followOutcome,
 	}
 	sealed := compressed || (len(all) > 0 && all[len(all)-1].rec.T == recExit)
 
-	for _, l := range trimBacklog(all, opts.lastN) {
+	for _, l := range visibleBacklog(all, opts) {
 		renderLine(os.Stdout, l, opts)
 		if opts.matched(l) {
 			return followMatched, nil

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,6 +170,21 @@ func TestNext(t *testing.T) {
 			t.Errorf("exit = %d; want 2; output:\n%s", code, out)
 		}
 	})
+}
+
+// TestShowSince verifies --since slices records within a run by timestamp.
+func TestShowSince(t *testing.T) {
+	proj, state, lineage := fixtureStore(t)
+	stale := record{T: recLine, TS: time.Now().Add(-2 * time.Hour), S: "old news"}
+	writeRun(t, lineage, 1, []record{metaRec(1, os.Getpid()), stale, lineRec("fresh line"), exitRec()})
+
+	out, code := readVerb(t, proj, state, 5*time.Second, "latest", "--since", "1h", "--plain")
+	if code != 0 {
+		t.Fatalf("exit = %d; output:\n%s", code, out)
+	}
+	if strings.Contains(out, "old news") || !strings.Contains(out, "fresh line") {
+		t.Errorf("--since window wrong:\n%s", out)
+	}
 }
 
 // TestTailRollsAcrossRuns starts tail on a sealed run without a match, then
