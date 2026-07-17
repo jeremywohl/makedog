@@ -22,6 +22,7 @@ type run struct {
 	number     int
 	cmd        *exec.Cmd
 	pty        *os.File
+	log        *runLog       // this run's log file, nil when persistence is unavailable
 	exit       chan error    // receives the cmd.Wait result, once
 	outputDone chan struct{} // closed when the output reader finishes
 	startTime  time.Time
@@ -29,8 +30,9 @@ type run struct {
 	stopReason string // why the run ended, whether internal or external
 }
 
-// startRun launches the binary under a pty and begins relaying its output.
-func startRun(binaryPath string, number int) (*run, error) {
+// startRun launches the binary under a pty and begins relaying its output,
+// recording into logFile (which may be nil) via the sink.
+func startRun(binaryPath string, number int, logFile *os.File) (*run, error) {
 	cmd := exec.Command(binaryPath)
 
 	// Start with pty for real-time output
@@ -51,6 +53,19 @@ func startRun(binaryPath string, number int) (*run, error) {
 	// Collect metadata
 	binaryHash, _ := getBinaryHash(binaryPath)
 	gitBranch, gitCommit, _ := getGitInfo()
+
+	// Open the run log with its header, then attach the sink so everything
+	// from the start message on is recorded.
+	if logFile != nil {
+		cwd, _ := os.Getwd()
+		r.log = &runLog{f: logFile}
+		r.log.write(record{
+			T: recMeta, TS: r.startTime, Run: number, Binary: binaryPath, Cwd: cwd,
+			Pid: cmd.Process.Pid, Hash: binaryHash, GitBranch: gitBranch, GitCommit: gitCommit,
+			Makedog: Version,
+		})
+		out.attach(r.log)
+	}
 
 	// Build the start message
 	msg := fmt.Sprintf("start %d %s (pid %d", number, binaryPath, cmd.Process.Pid)
@@ -118,6 +133,35 @@ func (r *run) stop() {
 	// The child is gone; let the reader drain its final output (e.g. graceful
 	// shutdown messages) before the pty closes.
 	r.drainOutput()
+}
+
+// finishLog seals the run's log with an exit record and detaches it from the
+// sink, so stragglers after the drain can't land past the trailer. Idempotent.
+func (r *run) finishLog() {
+	if r.log == nil {
+		return
+	}
+	out.detach()
+
+	rec := record{T: recExit, TS: r.stopTime, Reason: r.stopReason}
+	if state := r.cmd.ProcessState; state != nil {
+		code := state.ExitCode()
+		rec.ExitCode = &code
+		if ws, ok := state.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			rec.Signal = signalName(ws.Signal())
+		}
+		if ru, ok := state.SysUsage().(*syscall.Rusage); ok {
+			rec.MaxRSS = ru.Maxrss
+			rec.CPUNs = ru.Utime.Nano() + ru.Stime.Nano()
+		}
+	}
+	if !r.stopTime.IsZero() {
+		rec.WallNs = r.stopTime.Sub(r.startTime).Nanoseconds()
+	}
+
+	r.log.write(rec)
+	r.log.close()
+	r.log = nil
 }
 
 // drainOutput waits briefly for the output reader to finish, then closes the pty.

@@ -66,8 +66,10 @@ func (w *Makedog) keypressHelp() step {
 
 // keypressMark prints a timestamp marker line in the log output.
 func (w *Makedog) keypressMark() step {
-	timestamp := time.Now().Format("[2006-01-02 15:04:05.000]")
-	flagline("mark at "+timestamp, '-', false)
+	now := time.Now()
+	flagline("mark at "+now.Format("[2006-01-02 15:04:05.000]"), '-', false)
+	// The flagline is terminal chrome; persist the mark as a plain event.
+	out.record(record{T: recEvent, TS: now, S: "mark"})
 	return step{}
 }
 

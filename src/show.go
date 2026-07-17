@@ -1,0 +1,424 @@
+// Read-side verbs: replay a recorded run (optionally following it live) and
+// list a lineage's run history. Rendering mirrors the terminal sink, so a
+// replayed log reads like the original session. Snapshot output pages on a
+// terminal and streams raw when piped; only --follow keeps the process alive,
+// so tool callers never hang by default.
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"slices"
+	"strconv"
+	"strings"
+	"syscall"
+	"text/tabwriter"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/term"
+)
+
+// runRef identifies a recorded run: an absolute number, or a position counted
+// back from the most recent ("latest", "latest~2").
+type runRef struct {
+	latest bool
+	back   int
+	number int
+}
+
+// parseRunRef reports whether s names a run, and which.
+func parseRunRef(s string) (runRef, bool) {
+	if s == "latest" {
+		return runRef{latest: true}, true
+	}
+	if rest, ok := strings.CutPrefix(s, "latest~"); ok {
+		n, err := strconv.Atoi(rest)
+		if err != nil || n < 1 {
+			return runRef{}, false
+		}
+		return runRef{latest: true, back: n}, true
+	}
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
+		return runRef{number: n}, true
+	}
+	return runRef{}, false
+}
+
+func isRunRef(s string) bool {
+	_, ok := parseRunRef(s)
+	return ok
+}
+
+// showOptions carries the show verb's rendering and lifetime choices.
+type showOptions struct {
+	follow bool
+	lastN  int
+	json   bool
+	plain  bool
+}
+
+// showMain implements `makedog <ref>` and `makedog show <ref>`.
+func showMain(refArg string, args []string) {
+	fs := flag.NewFlagSet("show", flag.ExitOnError)
+	opts := showOptions{}
+	fs.BoolVar(&opts.follow, "f", false, "follow output as it arrives")
+	fs.BoolVar(&opts.follow, "follow", false, "follow output as it arrives")
+	fs.IntVar(&opts.lastN, "n", 0, "only the last N records")
+	fs.BoolVar(&opts.json, "json", false, "emit raw JSONL records")
+	fs.BoolVar(&opts.plain, "plain", false, "strip ANSI styling")
+	binary := fs.String("binary", "", "which binary's runs")
+	dir := fs.String("C", "", "project directory (default: current)")
+	fs.Parse(args)
+
+	ref, ok := parseRunRef(refArg)
+	if !ok {
+		fatal("bad run reference '%s' (a number, or latest[~N])", refArg)
+	}
+
+	store, err := openLineage(*dir, *binary)
+	if err != nil {
+		fatal("%v", err)
+	}
+	number, err := store.resolveRef(ref)
+	if err != nil {
+		fatal("%v", err)
+	}
+
+	if err := showRun(store.runPath(number), opts); err != nil {
+		fatal("%v", err)
+	}
+}
+
+// resolveRef maps a runRef onto this lineage's recorded run numbers.
+func (s *binaryStore) resolveRef(ref runRef) (int, error) {
+	numbers, err := s.runNumbers()
+	if err != nil || len(numbers) == 0 {
+		return 0, fmt.Errorf("no runs recorded for %s", s.meta.Binary)
+	}
+	if ref.latest {
+		i := len(numbers) - 1 - ref.back
+		if i < 0 {
+			return 0, fmt.Errorf("only %d runs recorded for %s", len(numbers), s.meta.Binary)
+		}
+		return numbers[i], nil
+	}
+	if !slices.Contains(numbers, ref.number) {
+		return 0, fmt.Errorf("run %d not found for %s (have %d..%d)",
+			ref.number, s.meta.Binary, numbers[0], numbers[len(numbers)-1])
+	}
+	return ref.number, nil
+}
+
+// logLine pairs a log's raw line with its parsed record.
+type logLine struct {
+	raw string
+	rec record
+}
+
+// recordReader yields complete lines from a possibly still-growing file,
+// holding a partial tail line until its newline arrives.
+type recordReader struct {
+	r       *bufio.Reader
+	pending []byte
+}
+
+func newRecordReader(f *os.File) *recordReader {
+	return &recordReader{r: bufio.NewReader(f)}
+}
+
+// next returns the next complete line, or io.EOF when no full line is
+// available yet.
+func (t *recordReader) next() (logLine, error) {
+	chunk, err := t.r.ReadBytes('\n')
+	t.pending = append(t.pending, chunk...)
+	if err != nil {
+		return logLine{}, err
+	}
+	raw := strings.TrimRight(string(t.pending), "\n")
+	t.pending = t.pending[:0]
+	var rec record
+	json.Unmarshal([]byte(raw), &rec) // a garbled line renders as an unknown record
+	return logLine{raw: raw, rec: rec}, nil
+}
+
+// showRun replays a run log per opts. Follow mode returns when the exit
+// record lands, or after a grace period once the writer is gone.
+func showRun(path string, opts showOptions) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	tail := newRecordReader(f)
+	var all []logLine
+	for {
+		line, err := tail.next()
+		if err != nil {
+			break
+		}
+		all = append(all, line)
+	}
+
+	pid := 0
+	if len(all) > 0 && all[0].rec.T == recMeta {
+		pid = all[0].rec.Pid
+	}
+	sealed := len(all) > 0 && all[len(all)-1].rec.T == recExit
+
+	backlog := all
+	if opts.lastN > 0 && len(backlog) > opts.lastN {
+		backlog = backlog[len(backlog)-opts.lastN:]
+	}
+
+	if !opts.follow {
+		return page(func(w io.Writer) {
+			for _, l := range backlog {
+				renderLine(w, l, opts)
+			}
+		})
+	}
+
+	for _, l := range backlog {
+		renderLine(os.Stdout, l, opts)
+	}
+	if sealed {
+		return nil
+	}
+	return followRun(tail, pid, opts)
+}
+
+// followRun streams new records until the run's exit record, polling the file
+// for growth. A dead child with no trailer after a grace period means the
+// writer died uncleanly; report and stop rather than wait forever.
+func followRun(tail *recordReader, pid int, opts showOptions) error {
+	const pollInterval = 250 * time.Millisecond
+	const gracePolls = 8
+
+	strikes := 0
+	for {
+		line, err := tail.next()
+		if err == nil {
+			renderLine(os.Stdout, line, opts)
+			if line.rec.T == recExit {
+				return nil
+			}
+			strikes = 0
+			continue
+		}
+		if err != io.EOF {
+			return err
+		}
+		if pid != 0 && syscall.Kill(pid, 0) != nil {
+			if strikes++; strikes >= gracePolls {
+				fmt.Fprintln(os.Stderr, "makedog: log ended without an exit record (writer gone)")
+				return nil
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+}
+
+// renderLine writes one record in the terminal sink's dialect.
+func renderLine(w io.Writer, l logLine, opts showOptions) {
+	if opts.json {
+		fmt.Fprintln(w, l.raw)
+		return
+	}
+	switch l.rec.T {
+	case recLine:
+		s := l.rec.S
+		if opts.plain {
+			s = ansi.Strip(s)
+		}
+		fmt.Fprintf(w, "%s  %s\n", l.rec.TS.Format("[2006-01-02 15:04:05.000]"), s)
+	case recCommand:
+		fmt.Fprintf(w, "--> %s\n", restyle(commandStyle, l.rec.S, opts))
+	case recEvent:
+		fmt.Fprintf(w, "* %s\n", restyle(eventStyle, l.rec.S, opts))
+	case recError:
+		fmt.Fprintf(w, "! %s\n", restyle(errorStyle, l.rec.S, opts))
+	case recMeta, recExit:
+		// Data records; their substance already appears as command/event lines.
+	}
+}
+
+func restyle(style lipgloss.Style, s string, opts showOptions) string {
+	if opts.plain {
+		return s
+	}
+	return style.Render(s)
+}
+
+// page routes output through $PAGER on a terminal, and directly otherwise.
+func page(render func(io.Writer)) error {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		render(os.Stdout)
+		return nil
+	}
+
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		pager = "less -FRX"
+	}
+	words := strings.Fields(pager)
+	cmd := exec.Command(words[0], words[1:]...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	in, err := cmd.StdinPipe()
+	if err == nil {
+		err = cmd.Start()
+	}
+	if err != nil {
+		render(os.Stdout)
+		return nil
+	}
+	render(in)
+	in.Close()
+	return cmd.Wait()
+}
+
+// runSummary is one row of `makedog runs`.
+type runSummary struct {
+	Run    int       `json:"run"`
+	Start  time.Time `json:"start,omitzero"`
+	WallNs int64     `json:"wall_ns,omitempty"`
+	Exit   string    `json:"exit"` // exit code, "sig NAME", "live", or "unclean"
+	Reason string    `json:"reason,omitempty"`
+	Git    string    `json:"git,omitempty"`
+}
+
+// runsMain implements `makedog runs`.
+func runsMain(args []string) {
+	fs := flag.NewFlagSet("runs", flag.ExitOnError)
+	jsonOut := fs.Bool("json", false, "emit JSONL summaries")
+	binary := fs.String("binary", "", "which binary's runs")
+	dir := fs.String("C", "", "project directory (default: current)")
+	fs.Parse(args)
+
+	store, err := openLineage(*dir, *binary)
+	if err != nil {
+		fatal("%v", err)
+	}
+	numbers, err := store.runNumbers()
+	if err != nil || len(numbers) == 0 {
+		fatal("no runs recorded for %s", store.meta.Binary)
+	}
+
+	summaries := make([]runSummary, 0, len(numbers))
+	for _, n := range numbers {
+		summaries = append(summaries, summarizeRun(store.runPath(n), n))
+	}
+
+	if *jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		for _, s := range summaries {
+			enc.Encode(s)
+		}
+		return
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "RUN\tSTART\tDURATION\tEXIT\tREASON\tGIT")
+	for _, s := range summaries {
+		start, duration := "?", ""
+		if !s.Start.IsZero() {
+			start = s.Start.Format("2006-01-02 15:04:05")
+		}
+		if s.WallNs > 0 {
+			duration = formatDuration(s.WallNs)
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", s.Run, start, duration, s.Exit, s.Reason, s.Git)
+	}
+	tw.Flush()
+}
+
+// summarizeRun builds a run's summary from its header and trailer records,
+// without scanning the middle of the log.
+func summarizeRun(path string, number int) runSummary {
+	s := runSummary{Run: number, Exit: "?"}
+	first, last, err := firstAndLastLines(path)
+	if err != nil {
+		return s
+	}
+
+	var meta, tail record
+	json.Unmarshal([]byte(first), &meta)
+	json.Unmarshal([]byte(last), &tail)
+
+	if meta.T == recMeta {
+		s.Start = meta.TS
+		if meta.GitBranch != "" {
+			commit := meta.GitCommit
+			if len(commit) > 7 {
+				commit = commit[:7]
+			}
+			s.Git = meta.GitBranch + "/" + commit
+		}
+	}
+
+	switch {
+	case tail.T == recExit:
+		s.WallNs = tail.WallNs
+		s.Reason = tail.Reason
+		switch {
+		case tail.Signal != "":
+			s.Exit = "sig " + tail.Signal
+		case tail.ExitCode != nil:
+			s.Exit = strconv.Itoa(*tail.ExitCode)
+		}
+	case meta.Pid != 0 && syscall.Kill(meta.Pid, 0) == nil:
+		s.Exit = "live"
+		if !s.Start.IsZero() {
+			s.WallNs = time.Since(s.Start).Nanoseconds()
+		}
+	default:
+		s.Exit = "unclean"
+	}
+	return s
+}
+
+// firstAndLastLines reads a log's opening line and trailing complete line
+// without scanning the middle. A partial trailing line (a record mid-write)
+// is ignored.
+func firstAndLastLines(path string) (string, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer f.Close()
+
+	first, err := bufio.NewReader(f).ReadString('\n')
+	if err != nil && first == "" {
+		return "", "", err
+	}
+	first = strings.TrimRight(first, "\n")
+
+	info, err := f.Stat()
+	if err != nil {
+		return first, "", err
+	}
+	const chunk = 64 * 1024
+	off := max(info.Size()-chunk, 0)
+	buf := make([]byte, info.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return first, "", err
+	}
+
+	end := bytes.LastIndexByte(buf, '\n')
+	if end < 0 {
+		return first, first, nil
+	}
+	buf = buf[:end]
+	if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+		return first, string(buf[i+1:]), nil
+	}
+	return first, string(buf), nil
+}

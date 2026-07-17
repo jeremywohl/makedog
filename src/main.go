@@ -1,5 +1,6 @@
 // Makedog: watch a server binary and restart it on change, with interactive
-// controls, signals, make targets, and per-run reporting.
+// controls, signals, make targets, and per-run reporting. Runs are recorded
+// to a durable store and replayable via the read verbs (show, runs).
 package main
 
 import (
@@ -9,56 +10,101 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strings"
 	"syscall"
 	"time"
 )
 
-func main() {
-	// setup flags
-	flag.CommandLine.Init(flag.CommandLine.Name(), flag.ContinueOnError)
-	flag.CommandLine.SetOutput(io.Discard)
-	flag.Usage = func() {} // prevent library's usage display
-	configPath := flag.String("c", "", "path to config file")
-	flag.StringVar(configPath, "config", "", "path to config file")
-	showHelp := flag.Bool("h", false, "print help")
-	flag.BoolVar(showHelp, "help", false, "print help")
+// Build identity, stamped by the Makefile via -ldflags.
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildTime = ""
+)
 
-	// parse flags
-	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+// main dispatches on the first argument: a verb, a run reference (show
+// sugar), or a slash-bearing or flag-led token (watch sugar). Bare words in
+// first position belong to makedog; a binary is always reachable as ./name.
+func main() {
+	args := os.Args[1:]
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, "makedog: no binary?\n\n")
+		usage()
+		os.Exit(1)
+	}
+
+	switch first := args[0]; {
+	case first == "-h" || first == "--help":
+		usage()
+		os.Exit(0)
+	case first == "watch":
+		watchMain(args[1:])
+	case first == "show":
+		if len(args) < 2 {
+			fatal("show: which run? (a number, or latest)")
+		}
+		showMain(args[1], args[2:])
+	case first == "runs":
+		runsMain(args[1:])
+	case isRunRef(first):
+		showMain(first, args[1:])
+	case strings.HasPrefix(first, "-") || strings.ContainsRune(first, '/'):
+		// Flag-led or slash-bearing: the traditional watch invocation.
+		watchMain(args)
+	default:
+		fatal("unknown verb '%s' (to watch a binary named that, use ./%s)", first, first)
+	}
+}
+
+// fatal reports an error and exits.
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "makedog: "+format+"\n", args...)
+	os.Exit(1)
+}
+
+// watchMain implements the watch verb: supervise a binary under the monitor loop.
+func watchMain(args []string) {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {} // prevent library's usage display
+	configPath := fs.String("c", "", "path to config file")
+	fs.StringVar(configPath, "config", "", "path to config file")
+	showHelp := fs.Bool("h", false, "print help")
+	fs.BoolVar(showHelp, "help", false, "print help")
+
+	if err := fs.Parse(args); err != nil {
 		errMsg := regexp.MustCompile(`-(\w{2,})`).ReplaceAllString(err.Error(), `--$1`)
 		fmt.Fprintf(os.Stderr, "makedog: %s\n\n", errMsg)
 		usage()
 		os.Exit(1)
 	}
 
-	// check for help flag
 	if *showHelp {
 		usage()
 		os.Exit(0)
 	}
 
-	// check for binary path argument
-	if flag.NArg() < 1 {
+	if fs.NArg() < 1 {
 		fmt.Fprint(os.Stderr, "makedog: no binary?\n\n")
 		usage()
 		os.Exit(1)
 	}
 
 	// validate binary
-	binaryPath := flag.Arg(0)
+	binaryPath := fs.Arg(0)
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "makedog: binary '%s' not found", binaryPath)
-		os.Exit(1)
+		fatal("binary '%s' not found", binaryPath)
 	}
+
+	// create before raw mode, so store/config warnings print normally
+	makedog := NewMakedog(binaryPath, *configPath)
 
 	// set raw terminal input
 	if err := setRawTerm(); err != nil {
-		fmt.Fprintf(os.Stderr, "makedog: error setting raw mode: %v\n", err)
-		os.Exit(1)
+		fatal("error setting raw mode: %v", err)
 	}
 
 	// run loop
-	makedog := NewMakedog(binaryPath, *configPath)
 	if err := makedog.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "makedog: error: %v\n", err)
 		makedog.exitCleanly(1)
@@ -68,8 +114,9 @@ func main() {
 // Makedog manages the lifecycle of watching and restarting a binary.
 type Makedog struct {
 	binaryPath   string
-	run          *run // current or most recent run; nil before the first start
-	runCount     int
+	run          *run         // current or most recent run; nil before the first start
+	runCount     int          // last run number; session-local fallback when store is nil
+	store        *binaryStore // durable run archive, nil when unavailable
 	lastMtime    int64
 	keyChan      chan byte
 	extSignal    chan os.Signal
@@ -78,10 +125,16 @@ type Makedog struct {
 }
 
 // NewMakedog creates a new Makedog instance for the given binary path.
+// A store failure disables run logging but never blocks watching.
 func NewMakedog(binaryPath, configPath string) *Makedog {
 	w := &Makedog{
 		binaryPath: binaryPath,
 		config:     loadConfig(configPath),
+	}
+
+	var err error
+	if w.store, err = openBinaryStore(binaryPath); err != nil {
+		fmt.Fprintf(os.Stderr, "makedog: run logs disabled: %v\n", err)
 	}
 
 	w.setupSignalHandlers()
@@ -105,6 +158,7 @@ func (w *Makedog) Run() error {
 func (w *Makedog) exitCleanly(status int) {
 	if w.run != nil {
 		w.run.drainOutput()
+		w.run.finishLog()
 	}
 	restoreTerm()
 	os.Exit(status)
@@ -117,7 +171,8 @@ func (w *Makedog) setupSignalHandlers() {
 	signal.Notify(w.extSignal, syscall.SIGINT, syscall.SIGTERM)
 }
 
-// startBinary begins a new run of the monitored binary.
+// startBinary begins a new run of the monitored binary, minting a durable run
+// number and log file when the store is available.
 func (w *Makedog) startBinary() error {
 	var err error
 	w.lastMtime, err = w.getMtime()
@@ -125,12 +180,26 @@ func (w *Makedog) startBinary() error {
 		return err
 	}
 
-	r, err := startRun(w.binaryPath, w.runCount+1)
+	number := w.runCount + 1
+	var logFile *os.File
+	if w.store != nil {
+		if n, f, err := w.store.beginRun(); err != nil {
+			out.Error("run log unavailable: %v", err)
+		} else {
+			number, logFile = n, f
+		}
+	}
+
+	r, err := startRun(w.binaryPath, number, logFile)
 	if err != nil {
+		if logFile != nil {
+			logFile.Close()
+			os.Remove(logFile.Name())
+		}
 		return err
 	}
 
-	w.runCount++
+	w.runCount = number
 	w.run = r
 	return nil
 }
@@ -211,6 +280,7 @@ func (w *Makedog) monitor() error {
 			w.run.stopTime = time.Now()
 			w.run.drainOutput()
 			w.printExitDetails(false)
+			w.run.finishLog()
 
 			// Check for spinning process
 			if w.checkForSpin() {
@@ -229,6 +299,7 @@ func (w *Makedog) monitor() error {
 				w.run.stopReason = s.stopReason
 				w.stopBinary()
 				w.printExitDetails(true)
+				w.run.finishLog()
 			} else if w.run != nil {
 				// The child may have exited on its own an instant before this
 				// step; report the buffered exit rather than dropping it.
@@ -237,6 +308,7 @@ func (w *Makedog) monitor() error {
 					w.run.stopTime = time.Now()
 					w.run.drainOutput()
 					w.printExitDetails(false)
+					w.run.finishLog()
 				default:
 				}
 			}
@@ -349,14 +421,16 @@ type processState interface {
 	SysUsage() interface{} // Returns *syscall.Rusage
 }
 
-// printExitDetails handles the child process exiting.
+// printExitDetails handles the child process exiting, keeping the derived
+// stop reason on the run so the log's exit record carries it.
 func (w *Makedog) printExitDetails(makedogInitiated bool) {
 	r := w.run
-	_printExitDetails(r.cmd.ProcessState, r.number, r.startTime, r.stopTime, w.binaryPath, makedogInitiated, r.stopReason)
+	r.stopReason = _printExitDetails(r.cmd.ProcessState, r.number, r.startTime, r.stopTime, w.binaryPath, makedogInitiated, r.stopReason)
 }
 
-// _printExitDetails handles the child process exiting (internal, testable function).
-func _printExitDetails(state processState, number int, startTime, stopTime time.Time, binaryPath string, makedogInitiated bool, stopReason string) {
+// _printExitDetails handles the child process exiting (internal, testable
+// function). Returns the stop reason, which it may derive from the exit state.
+func _printExitDetails(state processState, number int, startTime, stopTime time.Time, binaryPath string, makedogInitiated bool, stopReason string) string {
 	exitCode := state.ExitCode()
 	waitStatus := state.Sys().(waitStatus)
 	sysUsage := state.SysUsage().(*syscall.Rusage)
@@ -393,4 +467,6 @@ func _printExitDetails(state processState, number int, startTime, stopTime time.
 	}
 
 	println()
+
+	return stopReason
 }

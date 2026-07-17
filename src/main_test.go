@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -838,6 +839,8 @@ func makedogSession(t *testing.T, script string) (*exec.Cmd, func() string, int)
 
 	cmd := exec.Command(makedogBinary(t), child)
 	cmd.Dir = dir
+	// Isolate the run store: tests must not write into the user's real one.
+	cmd.Env = append(os.Environ(), "MAKEDOG_STATE_DIR="+filepath.Join(dir, "state"))
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatalf("starting makedog: %v", err)
@@ -949,6 +952,53 @@ func TestLongLineDoesNotStopCapture(t *testing.T) {
 
 	cmd.Process.Signal(syscall.SIGTERM)
 	waitForExit(t, cmd, childPid)
+}
+
+// TestRunLogRecorded verifies a run is persisted end to end: a store lineage
+// appears under MAKEDOG_STATE_DIR, opened by a meta header carrying the child
+// pid, holding the child's output, and sealed by an exit trailer.
+func TestRunLogRecorded(t *testing.T) {
+	cmd, snapshot, childPid := makedogSession(t, "#!/bin/sh\necho hello from child\nwhile :; do sleep 0.1; done\n")
+
+	waitForOutput(t, cmd, snapshot, "child output", func(s string) bool {
+		return strings.Contains(s, "hello from child")
+	})
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signaling makedog: %v", err)
+	}
+	waitForExit(t, cmd, childPid)
+
+	logs, err := filepath.Glob(filepath.Join(cmd.Dir, "state", "*", "*", "runs", "000001.jsonl"))
+	if err != nil || len(logs) != 1 {
+		t.Fatalf("expected one run log, got %v (err %v)", logs, err)
+	}
+
+	data, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected meta, output, and exit records, got:\n%s", data)
+	}
+
+	var header, trailer record
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatalf("parsing header: %v", err)
+	}
+	if header.T != recMeta || header.Run != 1 || header.Pid != childPid {
+		t.Errorf("header = %+v; want meta record for run 1, pid %d", header, childPid)
+	}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &trailer); err != nil {
+		t.Fatalf("parsing trailer: %v", err)
+	}
+	if trailer.T != recExit || trailer.Reason == "" {
+		t.Errorf("trailer = %+v; want exit record with a reason", trailer)
+	}
+	if !strings.Contains(string(data), "hello from child") {
+		t.Errorf("child output missing from run log:\n%s", data)
+	}
 }
 
 // TestGracefulShutdownOutputCaptured verifies output the child writes while
