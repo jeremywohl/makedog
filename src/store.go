@@ -262,10 +262,8 @@ func loadLineage(dir string) (*binaryStore, error) {
 	return &binaryStore{dir: dir, meta: meta}, nil
 }
 
-// openLineage resolves a read-side target: the lineage for --binary when
-// given, the project's sole lineage otherwise, or its most recently active
-// one (noted on stderr) when several exist.
-func openLineage(dirFlag, binaryFlag string) (*binaryStore, error) {
+// projectLineages lists a project's lineages, most recently active first.
+func projectLineages(dirFlag string) ([]*binaryStore, error) {
 	root, err := storeRoot()
 	if err != nil {
 		return nil, err
@@ -274,17 +272,8 @@ func openLineage(dirFlag, binaryFlag string) (*binaryStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	projectDir := filepath.Join(root, slug(cwd))
 
-	if binaryFlag != "" {
-		s, err := loadLineage(filepath.Join(projectDir, slug(binaryKey(cwd, binaryFlag))))
-		if err != nil {
-			return nil, fmt.Errorf("no runs recorded for %s in %s", binaryFlag, cwd)
-		}
-		return s, nil
-	}
-
-	entries, err := os.ReadDir(projectDir)
+	entries, err := os.ReadDir(filepath.Join(root, slug(cwd)))
 	if err != nil {
 		return nil, fmt.Errorf("no runs recorded for %s", cwd)
 	}
@@ -293,20 +282,45 @@ func openLineage(dirFlag, binaryFlag string) (*binaryStore, error) {
 		if !e.IsDir() {
 			continue
 		}
-		if s, err := loadLineage(filepath.Join(projectDir, e.Name())); err == nil {
+		if s, err := loadLineage(filepath.Join(root, slug(cwd), e.Name())); err == nil {
 			stores = append(stores, s)
 		}
 	}
-
-	switch len(stores) {
-	case 0:
+	if len(stores) == 0 {
 		return nil, fmt.Errorf("no runs recorded for %s", cwd)
-	case 1:
-		return stores[0], nil
 	}
 	sort.Slice(stores, func(i, j int) bool {
 		return stores[i].lastActivity().After(stores[j].lastActivity())
 	})
-	fmt.Fprintf(os.Stderr, "makedog: using %s (most recently active; --binary to choose another)\n", stores[0].meta.Binary)
+	return stores, nil
+}
+
+// openLineage resolves a read-side target: the lineage for --binary when
+// given, the project's sole lineage otherwise, or its most recently active
+// one (noted on stderr) when several exist.
+func openLineage(dirFlag, binaryFlag string) (*binaryStore, error) {
+	if binaryFlag != "" {
+		root, err := storeRoot()
+		if err != nil {
+			return nil, err
+		}
+		cwd, err := realDir(dirFlag)
+		if err != nil {
+			return nil, err
+		}
+		s, err := loadLineage(filepath.Join(root, slug(cwd), slug(binaryKey(cwd, binaryFlag))))
+		if err != nil {
+			return nil, fmt.Errorf("no runs recorded for %s in %s", binaryFlag, cwd)
+		}
+		return s, nil
+	}
+
+	stores, err := projectLineages(dirFlag)
+	if err != nil {
+		return nil, err
+	}
+	if len(stores) > 1 {
+		fmt.Fprintf(os.Stderr, "makedog: using %s (most recently active; --binary to choose another)\n", stores[0].meta.Binary)
+	}
 	return stores[0], nil
 }

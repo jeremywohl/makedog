@@ -50,6 +50,8 @@ func main() {
 		nextMain(args[1:])
 	case first == "tail":
 		tailMain(args[1:])
+	case first == "search" || first == "grep":
+		searchMain(args[1:])
 	case isRunRef(first):
 		showMain(first, args[1:])
 	case strings.HasPrefix(first, "-") || strings.ContainsRune(first, '/'):
