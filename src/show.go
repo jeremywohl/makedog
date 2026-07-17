@@ -1,8 +1,11 @@
-// Read-side verbs: replay a recorded run (optionally following it live) and
-// list a lineage's run history. Rendering mirrors the terminal sink, so a
-// replayed log reads like the original session. Snapshot output pages on a
-// terminal and streams raw when piped; only --follow keeps the process alive,
-// so tool callers never hang by default.
+// Read-side verbs: replay a recorded run (optionally following it live),
+// wait on the next run, tail a lineage across restarts, and list run history.
+// Rendering mirrors the terminal sink, so a replayed log reads like the
+// original session. Snapshot output pages on a terminal and streams raw when
+// piped; only the explicitly blocking forms (--follow, --until, next, tail)
+// keep the process alive, so tool callers never hang by default. Blocking
+// forms exit 0 on success or an --until match, 1 when the run ends before a
+// match, and 2 on --timeout.
 package main
 
 import (
@@ -14,6 +17,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,43 +61,193 @@ func isRunRef(s string) bool {
 	return ok
 }
 
-// showOptions carries the show verb's rendering and lifetime choices.
+// showOptions carries the read verbs' rendering and lifetime choices.
 type showOptions struct {
-	follow bool
-	lastN  int
-	json   bool
-	plain  bool
+	follow   bool
+	lastN    int
+	json     bool
+	plain    bool
+	until    *regexp.Regexp // stop following on a matching payload; implies follow
+	deadline time.Time      // stop following at this instant; zero means never
+}
+
+// matched reports whether a record's payload satisfies --until.
+func (o *showOptions) matched(l logLine) bool {
+	return o.until != nil && l.rec.S != "" && o.until.MatchString(ansi.Strip(l.rec.S))
+}
+
+// expired reports whether --timeout has elapsed.
+func (o *showOptions) expired() bool {
+	return !o.deadline.IsZero() && time.Now().After(o.deadline)
+}
+
+// readFlags declares the flags every read verb shares; verbs add their own to
+// fs before parse.
+type readFlags struct {
+	fs      *flag.FlagSet
+	until   *string
+	timeout *time.Duration
+	binary  *string
+	dir     *string
+}
+
+func newReadFlags(name string, opts *showOptions) *readFlags {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	fs.BoolVar(&opts.json, "json", false, "emit raw JSONL records")
+	fs.BoolVar(&opts.plain, "plain", false, "strip ANSI styling")
+	return &readFlags{
+		fs:      fs,
+		until:   fs.String("until", "", "stream until a line matches this regex"),
+		timeout: fs.Duration("timeout", 0, "give up after this duration (exit 2)"),
+		binary:  fs.String("binary", "", "which binary's runs"),
+		dir:     fs.String("C", "", "project directory (default: current)"),
+	}
+}
+
+// parse finalizes the shared flags into opts and resolves the target lineage.
+func (r *readFlags) parse(args []string, opts *showOptions) *binaryStore {
+	r.fs.Parse(args)
+
+	if *r.until != "" {
+		re, err := regexp.Compile(*r.until)
+		if err != nil {
+			fatal("bad --until pattern: %v", err)
+		}
+		opts.until = re
+		opts.follow = true
+	}
+	if *r.timeout > 0 {
+		opts.deadline = time.Now().Add(*r.timeout)
+	}
+
+	store, err := openLineage(*r.dir, *r.binary)
+	if err != nil {
+		fatal("%v", err)
+	}
+	return store
 }
 
 // showMain implements `makedog <ref>` and `makedog show <ref>`.
 func showMain(refArg string, args []string) {
-	fs := flag.NewFlagSet("show", flag.ExitOnError)
 	opts := showOptions{}
-	fs.BoolVar(&opts.follow, "f", false, "follow output as it arrives")
-	fs.BoolVar(&opts.follow, "follow", false, "follow output as it arrives")
-	fs.IntVar(&opts.lastN, "n", 0, "only the last N records")
-	fs.BoolVar(&opts.json, "json", false, "emit raw JSONL records")
-	fs.BoolVar(&opts.plain, "plain", false, "strip ANSI styling")
-	binary := fs.String("binary", "", "which binary's runs")
-	dir := fs.String("C", "", "project directory (default: current)")
-	fs.Parse(args)
+	rf := newReadFlags("show", &opts)
+	rf.fs.BoolVar(&opts.follow, "f", false, "follow output as it arrives")
+	rf.fs.BoolVar(&opts.follow, "follow", false, "follow output as it arrives")
+	rf.fs.IntVar(&opts.lastN, "n", 0, "only the last N records")
 
 	ref, ok := parseRunRef(refArg)
 	if !ok {
 		fatal("bad run reference '%s' (a number, or latest[~N])", refArg)
 	}
 
-	store, err := openLineage(*dir, *binary)
-	if err != nil {
-		fatal("%v", err)
-	}
+	store := rf.parse(args, &opts)
 	number, err := store.resolveRef(ref)
 	if err != nil {
 		fatal("%v", err)
 	}
 
-	if err := showRun(store.runPath(number), opts); err != nil {
+	status, err := showRun(store.runPath(number), opts)
+	if err != nil {
 		fatal("%v", err)
+	}
+	if status != 0 {
+		os.Exit(status)
+	}
+}
+
+// nextMain implements `makedog next`: wait for a run newer than the current
+// latest, stream it from the start, and end by seal, match, or timeout.
+func nextMain(args []string) {
+	opts := showOptions{follow: true}
+	rf := newReadFlags("next", &opts)
+	store := rf.parse(args, &opts)
+
+	baseline := 0
+	if numbers, err := store.runNumbers(); err == nil && len(numbers) > 0 {
+		baseline = numbers[len(numbers)-1]
+	}
+
+	fmt.Fprintf(os.Stderr, "makedog: waiting for the next run of %s\n", store.meta.Binary)
+	number, ok := waitForRunAfter(store, baseline, &opts)
+	if !ok {
+		os.Exit(2)
+	}
+
+	status, err := showRun(store.runPath(number), opts)
+	if err != nil {
+		fatal("%v", err)
+	}
+	if status != 0 {
+		os.Exit(status)
+	}
+}
+
+// tailMain implements `makedog tail`: follow the lineage across restarts,
+// rolling from each run into its successor. Endless by design, short of an
+// --until match, a --timeout, or an interrupt.
+func tailMain(args []string) {
+	opts := showOptions{follow: true}
+	rf := newReadFlags("tail", &opts)
+	lastN := rf.fs.Int("n", 10, "initial backlog from the current run")
+	store := rf.parse(args, &opts)
+
+	current := 0
+	if numbers, err := store.runNumbers(); err == nil && len(numbers) > 0 {
+		current = numbers[len(numbers)-1]
+	}
+	if current == 0 {
+		fmt.Fprintf(os.Stderr, "makedog: waiting for a run of %s\n", store.meta.Binary)
+		n, ok := waitForRunAfter(store, 0, &opts)
+		if !ok {
+			os.Exit(2)
+		}
+		current = n
+	}
+
+	firstAttach := true
+	for {
+		runOpts := opts
+		if firstAttach {
+			runOpts.lastN = *lastN // successors stream whole from their start
+		}
+		firstAttach = false
+
+		outcome, err := streamRun(store.runPath(current), runOpts)
+		if err != nil {
+			fatal("%v", err)
+		}
+		switch outcome {
+		case followMatched:
+			os.Exit(0)
+		case followTimedOut:
+			os.Exit(2)
+		}
+
+		// Sealed or writer gone: roll into the next run once it begins.
+		n, ok := waitForRunAfter(store, current, &opts)
+		if !ok {
+			os.Exit(2)
+		}
+		current = n
+	}
+}
+
+// waitForRunAfter polls for a run numbered past baseline, honoring the
+// deadline. Returns the earliest such run, in case several appeared.
+func waitForRunAfter(store *binaryStore, baseline int, opts *showOptions) (int, bool) {
+	for {
+		if numbers, err := store.runNumbers(); err == nil {
+			for _, n := range numbers {
+				if n > baseline {
+					return n, true
+				}
+			}
+		}
+		if opts.expired() {
+			fmt.Fprintln(os.Stderr, "makedog: timeout")
+			return 0, false
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
@@ -149,24 +303,81 @@ func (t *recordReader) next() (logLine, error) {
 	return logLine{raw: raw, rec: rec}, nil
 }
 
-// showRun replays a run log per opts. Follow mode returns when the exit
-// record lands, or after a grace period once the writer is gone.
-func showRun(path string, opts showOptions) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+// followOutcome says how a followed run ended.
+type followOutcome int
 
-	tail := newRecordReader(f)
+const (
+	followSealed     followOutcome = iota // the exit record arrived
+	followMatched                         // an --until pattern matched
+	followTimedOut                        // the --timeout deadline passed
+	followWriterGone                      // no trailer, and the writer has died
+)
+
+// readBacklog consumes the records already present in the log.
+func readBacklog(tail *recordReader) []logLine {
 	var all []logLine
 	for {
 		line, err := tail.next()
 		if err != nil {
-			break
+			return all
 		}
 		all = append(all, line)
 	}
+}
+
+func trimBacklog(all []logLine, n int) []logLine {
+	if n > 0 && len(all) > n {
+		return all[len(all)-n:]
+	}
+	return all
+}
+
+// showRun replays a run log per opts, returning the process exit status:
+// 0 on success or match, 1 when the run ends before an --until match, 2 on
+// timeout. Snapshot mode pages and always succeeds.
+func showRun(path string, opts showOptions) (int, error) {
+	if !opts.follow {
+		f, err := os.Open(path)
+		if err != nil {
+			return 1, err
+		}
+		defer f.Close()
+		backlog := trimBacklog(readBacklog(newRecordReader(f)), opts.lastN)
+		return 0, page(func(w io.Writer) {
+			for _, l := range backlog {
+				renderLine(w, l, opts)
+			}
+		})
+	}
+
+	outcome, err := streamRun(path, opts)
+	if err != nil {
+		return 1, err
+	}
+	switch outcome {
+	case followMatched:
+		return 0, nil
+	case followTimedOut:
+		return 2, nil
+	default: // sealed, or writer gone (already reported)
+		if opts.until != nil {
+			return 1, nil
+		}
+		return 0, nil
+	}
+}
+
+// streamRun renders a run's backlog and follows it to an outcome, honoring
+// --until within the backlog itself so an already-passed match still counts.
+func streamRun(path string, opts showOptions) (followOutcome, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return followSealed, err
+	}
+	defer f.Close()
+
+	tail := newRecordReader(f)
+	all := readBacklog(tail)
 
 	pid := 0
 	if len(all) > 0 && all[0].rec.T == recMeta {
@@ -174,32 +385,23 @@ func showRun(path string, opts showOptions) error {
 	}
 	sealed := len(all) > 0 && all[len(all)-1].rec.T == recExit
 
-	backlog := all
-	if opts.lastN > 0 && len(backlog) > opts.lastN {
-		backlog = backlog[len(backlog)-opts.lastN:]
-	}
-
-	if !opts.follow {
-		return page(func(w io.Writer) {
-			for _, l := range backlog {
-				renderLine(w, l, opts)
-			}
-		})
-	}
-
-	for _, l := range backlog {
+	for _, l := range trimBacklog(all, opts.lastN) {
 		renderLine(os.Stdout, l, opts)
+		if opts.matched(l) {
+			return followMatched, nil
+		}
 	}
 	if sealed {
-		return nil
+		return followSealed, nil
 	}
 	return followRun(tail, pid, opts)
 }
 
-// followRun streams new records until the run's exit record, polling the file
-// for growth. A dead child with no trailer after a grace period means the
-// writer died uncleanly; report and stop rather than wait forever.
-func followRun(tail *recordReader, pid int, opts showOptions) error {
+// followRun streams new records until the run's exit record, an --until
+// match, or the deadline, polling the file for growth. A dead child with no
+// trailer after a grace period means the writer died uncleanly; report and
+// stop rather than wait forever.
+func followRun(tail *recordReader, pid int, opts showOptions) (followOutcome, error) {
 	const pollInterval = 250 * time.Millisecond
 	const gracePolls = 8
 
@@ -208,19 +410,26 @@ func followRun(tail *recordReader, pid int, opts showOptions) error {
 		line, err := tail.next()
 		if err == nil {
 			renderLine(os.Stdout, line, opts)
+			if opts.matched(line) {
+				return followMatched, nil
+			}
 			if line.rec.T == recExit {
-				return nil
+				return followSealed, nil
 			}
 			strikes = 0
 			continue
 		}
 		if err != io.EOF {
-			return err
+			return followSealed, err
+		}
+		if opts.expired() {
+			fmt.Fprintln(os.Stderr, "makedog: timeout")
+			return followTimedOut, nil
 		}
 		if pid != 0 && syscall.Kill(pid, 0) != nil {
 			if strikes++; strikes >= gracePolls {
 				fmt.Fprintln(os.Stderr, "makedog: log ended without an exit record (writer gone)")
-				return nil
+				return followWriterGone, nil
 			}
 		}
 		time.Sleep(pollInterval)
