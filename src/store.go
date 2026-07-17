@@ -205,6 +205,18 @@ func (s *binaryStore) runNumbers() ([]int, error) {
 	return numbers, nil
 }
 
+// runFilePath reports a run's on-disk file, whichever form it wears.
+func (s *binaryStore) runFilePath(number int) (path string, compressed bool, err error) {
+	plain := s.runPath(number)
+	if _, err := os.Stat(plain); err == nil {
+		return plain, false, nil
+	}
+	if _, err := os.Stat(plain + ".zst"); err == nil {
+		return plain + ".zst", true, nil
+	}
+	return "", false, fmt.Errorf("run %d has no log file", number)
+}
+
 // openRun opens a run log for reading, transparently decompressing. The
 // compressed flag also means the run is necessarily sealed: maintenance only
 // compresses runs past the protected window.

@@ -52,6 +52,10 @@ func main() {
 		tailMain(args[1:])
 	case first == "search" || first == "grep":
 		searchMain(args[1:])
+	case first == "path":
+		pathMain(args[1:])
+	case first == "info":
+		infoMain(args[1:])
 	case isRunRef(first):
 		showMain(first, args[1:])
 	case strings.HasPrefix(first, "-") || strings.ContainsRune(first, '/'):

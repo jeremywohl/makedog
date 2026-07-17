@@ -30,6 +30,8 @@ func usage() {
 	printOption("next", "Wait for the next run to begin and stream it from its start")
 	printOption("tail", "Follow live output across restarts, endlessly")
 	printOption("search <regex>", "Grep recorded runs (alias: grep); exit 1 when nothing matches")
+	printOption("info [ref]", "One run's metadata card, default latest; --json for one object")
+	printOption("path [ref]", "A run log's file path; the lineage directory with no ref")
 	printStderr("\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Watch options:"))
