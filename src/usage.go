@@ -32,6 +32,7 @@ func usage() {
 	printOption("search <regex>", "Grep recorded runs (alias: grep); exit 1 when nothing matches")
 	printOption("info [ref]", "One run's metadata card, default latest; --json for one object")
 	printOption("path [ref]", "A run log's file path; the lineage directory with no ref")
+	printOption("diff [a [b]]", "Unified diff of two runs' output, default latest~1 vs latest")
 	printStderr("\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Watch options:"))

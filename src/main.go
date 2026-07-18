@@ -56,6 +56,8 @@ func main() {
 		pathMain(args[1:])
 	case first == "info":
 		infoMain(args[1:])
+	case first == "diff":
+		diffMain(args[1:])
 	case isRunRef(first):
 		showMain(first, args[1:])
 	case strings.HasPrefix(first, "-") || strings.ContainsRune(first, '/'):
