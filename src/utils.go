@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
@@ -67,17 +68,80 @@ func line() {
 	flagline("", '-', true)
 }
 
+// Watch-mode terminal writes flow through a dedicated goroutine: a stalled
+// terminal (Ctrl-S flow control, an undrained pty) must never wedge the
+// monitor loop, whose liveness restart-on-change, keypresses, and control
+// replies all depend on. The deep queue absorbs transient stalls; a sustained
+// one eventually applies backpressure rather than growing without bound.
+// Until startTermWriter runs (read verbs, tests), writes are direct.
+var (
+	termWrites chan string
+	termFlush  chan chan struct{}
+)
+
+// startTermWriter begins asynchronous terminal output for watch mode.
+func startTermWriter() {
+	termWrites = make(chan string, 4_096)
+	termFlush = make(chan chan struct{})
+
+	go func() {
+		for {
+			select {
+			case s := <-termWrites:
+				os.Stdout.WriteString(s)
+			case ack := <-termFlush:
+				for {
+					select {
+					case s := <-termWrites:
+						os.Stdout.WriteString(s)
+						continue
+					default:
+					}
+					break
+				}
+				close(ack)
+			}
+		}
+	}()
+}
+
+// flushTerm waits briefly for queued output to reach the terminal, so exits
+// don't drop tail output; the bound keeps a stalled terminal from wedging
+// the exit itself.
+func flushTerm() {
+	if termFlush == nil {
+		return
+	}
+	ack := make(chan struct{})
+	select {
+	case termFlush <- ack:
+		select {
+		case <-ack:
+		case <-time.After(2 * time.Second):
+		}
+	case <-time.After(2 * time.Second):
+	}
+}
+
 // printf prints formatted output with proper line endings for raw terminal mode.
 // In raw mode, the terminal doesn't automatically convert \n to \r\n, so we must
 // use \r\n explicitly for carriage return + line feed.
 func printf(format string, args ...interface{}) {
 	format = strings.ReplaceAll(format, "\n", "\r\n")
 	output := fmt.Sprintf(format, args...)
+	if termWrites != nil {
+		termWrites <- output
+		return
+	}
 	fmt.Print(output)
 }
 
 // println prints a blank line for raw terminal mode.
 func println() {
+	if termWrites != nil {
+		termWrites <- "\r\n"
+		return
+	}
 	fmt.Print("\r\n")
 }
 

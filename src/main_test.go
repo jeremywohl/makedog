@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -803,7 +804,16 @@ var (
 	makedogBinOnce sync.Once
 	makedogBinPath string
 	makedogBinErr  error
+	drainPaused    sync.Map // *exec.Cmd -> *atomic.Bool
 )
+
+// pauseDrain stalls or resumes a session's pty reader, simulating a terminal
+// that has stopped consuming output.
+func pauseDrain(t *testing.T, cmd *exec.Cmd, paused bool) {
+	t.Helper()
+	flag, _ := drainPaused.LoadOrStore(cmd, &atomic.Bool{})
+	flag.(*atomic.Bool).Store(paused)
+}
 
 // makedogBinary builds the makedog binary once per test run and returns its path.
 func makedogBinary(t *testing.T) string {
@@ -848,13 +858,18 @@ func makedogSession(t *testing.T, script string) (*exec.Cmd, func() string, int)
 	t.Cleanup(func() { ptmx.Close() })
 
 	// Drain the pty continuously, accumulating output for snapshots. Styling
-	// escapes are stripped so tests can match plain text.
+	// escapes are stripped so tests can match plain text. Tests may stall the
+	// drain (pauseDrain) to simulate a wedged terminal.
 	ansiRe := regexp.MustCompile("\x1b\\[[0-9;]*m")
 	var mu sync.Mutex
 	var output []byte
 	go func() {
 		buf := make([]byte, 4096)
 		for {
+			if p, ok := drainPaused.Load(cmd); ok && p.(*atomic.Bool).Load() {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
 			n, err := ptmx.Read(buf)
 			mu.Lock()
 			output = append(output, buf[:n]...)

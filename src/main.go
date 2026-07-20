@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"regexp"
@@ -58,6 +59,12 @@ func main() {
 		infoMain(args[1:])
 	case first == "diff":
 		diffMain(args[1:])
+	case first == "status":
+		statusMain(args[1:])
+	case first == "restart" || first == "stop" || first == "start":
+		controlMain(ctrlRequest{Cmd: first}, args[1:])
+	case first == "signal":
+		signalMain(args[1:])
 	case isRunRef(first):
 		showMain(first, args[1:])
 	case strings.HasPrefix(first, "-") || strings.ContainsRune(first, '/'):
@@ -111,10 +118,11 @@ func watchMain(args []string) {
 	// create before raw mode, so store/config warnings print normally
 	makedog := NewMakedog(binaryPath, *configPath)
 
-	// set raw terminal input
+	// set raw terminal input, with monitor-decoupled output
 	if err := setRawTerm(); err != nil {
 		fatal("error setting raw mode: %v", err)
 	}
+	startTermWriter()
 
 	// run loop
 	if err := makedog.Run(); err != nil {
@@ -130,6 +138,10 @@ type Makedog struct {
 	runCount     int          // last run number; session-local fallback when store is nil
 	store        *binaryStore // durable run archive, nil when unavailable
 	retention    retentionPolicy
+	ctrlChan     chan *ctrlRequest // remote commands into the monitor loop; nil disables
+	ctrlPending  chan ctrlResponse // parked reply for an in-flight state change
+	ctrlListener net.Listener      // this instance's control socket
+	ctrlSocket   string
 	lastMtime    int64
 	keyChan      chan byte
 	extSignal    chan os.Signal
@@ -167,6 +179,7 @@ func (w *Makedog) Run() error {
 
 	if w.store != nil {
 		go w.maintainStore()
+		w.startControl()
 	}
 
 	return w.monitor()
@@ -178,6 +191,8 @@ func (w *Makedog) exitCleanly(status int) {
 		w.run.drainOutput()
 		w.run.finishLog()
 	}
+	w.stopControl()
+	flushTerm()
 	restoreTerm()
 	os.Exit(status)
 }
@@ -290,6 +305,8 @@ func (w *Makedog) monitor() error {
 		select {
 		case key := <-w.keyChan:
 			s = w.handleKeypress(key)
+		case req := <-w.ctrlChan:
+			s = w.handleControl(req)
 		case sig := <-w.extSignal:
 			s = step{stopBinary: true, exitAfter: true, stopReason: "external signal " + signalName(sig.(syscall.Signal))}
 		case <-ticker.C:
@@ -345,6 +362,8 @@ func (w *Makedog) monitor() error {
 				out.Error("failed to start %s: %v", w.binaryPath, err)
 			}
 		}
+
+		w.flushControlReply()
 	}
 }
 

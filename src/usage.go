@@ -33,6 +33,9 @@ func usage() {
 	printOption("info [ref]", "One run's metadata card, default latest; --json for one object")
 	printOption("path [ref]", "A run log's file path; the lineage directory with no ref")
 	printOption("diff [a [b]]", "Unified diff of two runs' output, default latest~1 vs latest")
+	printOption("status", "List live makedog instances for the project")
+	printOption("restart, stop, start", "Command a live instance's binary remotely")
+	printOption("signal <name>", "Send the binary a signal remotely, e.g. HUP or USR1")
 	printStderr("\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Watch options:"))
@@ -51,6 +54,10 @@ func usage() {
 	printOption("--runs <a..b>", "Limit to a run number or range")
 	printOption("--since <age>", "Only runs active within this age, like 2d or 6h")
 	printOption("--all-binaries", "Search every binary recorded for the project")
+	printStderr("\n")
+
+	printStderr("%s\n", boldUnderStyle.Render("Control options:"))
+	printOption("--instance <pid>", "Target this makedog pid, when several are live")
 	printStderr("\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Shared read options:"))
