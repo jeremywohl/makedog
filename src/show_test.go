@@ -203,3 +203,42 @@ func TestTailRollsAcrossRuns(t *testing.T) {
 		t.Errorf("exit = %d; want 0; output:\n%s", code, out)
 	}
 }
+
+func TestRunsLong(t *testing.T) {
+	proj, state, _ := searchFixture(t) // runs 1 (compressed), 2, 3
+
+	t.Run("json emits one full card per run", func(t *testing.T) {
+		out, code := readVerb(t, proj, state, 5*time.Second, "runs", "--long", "--json")
+		if code != 0 {
+			t.Fatalf("exit = %d; output:\n%s", code, out)
+		}
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if len(lines) != 3 {
+			t.Fatalf("got %d cards; want 3:\n%s", len(lines), out)
+		}
+		for i, line := range lines {
+			var card runCard
+			if err := json.Unmarshal([]byte(line), &card); err != nil {
+				t.Fatalf("parsing card %d: %v\n%s", i, err, line)
+			}
+			if card.Run != i+1 || card.Status != "sealed" || card.LogSize == 0 {
+				t.Errorf("card %d = %+v", i, card)
+			}
+			if (i == 0) != card.Compressed {
+				t.Errorf("card %d compressed = %v", i, card.Compressed)
+			}
+		}
+	})
+
+	t.Run("table carries the wide columns", func(t *testing.T) {
+		out, code := readVerb(t, proj, state, 5*time.Second, "runs", "--long")
+		if code != 0 {
+			t.Fatalf("exit = %d; output:\n%s", code, out)
+		}
+		for _, want := range []string{"CPU", "MEMORY", "SIZE", "quit requested"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q:\n%s", want, out)
+			}
+		}
+	})
+}

@@ -83,6 +83,32 @@ type runCard struct {
 	Compressed bool      `json:"compressed"`
 }
 
+// exitLabel compresses a card's outcome to one word: the exit code,
+// "sig NAME", or the bare status when the run never sealed.
+func (c runCard) exitLabel() string {
+	switch {
+	case c.Signal != "":
+		return "sig " + c.Signal
+	case c.ExitCode != nil:
+		return strconv.Itoa(*c.ExitCode)
+	case c.Status != "":
+		return c.Status
+	}
+	return "?"
+}
+
+// gitLabel renders a card's git position as branch/abbrev, or nothing.
+func (c runCard) gitLabel() string {
+	if c.GitBranch == "" {
+		return ""
+	}
+	commit := c.GitCommit
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	return c.GitBranch + "/" + commit
+}
+
 // infoMain implements `makedog info [ref]`, defaulting to latest.
 func infoMain(args []string) {
 	ref, rest := splitRef(args)
@@ -208,12 +234,8 @@ func renderRunCard(c runCard) {
 	if c.Hash != "" {
 		row("hash", "%s", c.Hash[:min(7, len(c.Hash))])
 	}
-	if c.GitBranch != "" {
-		commit := c.GitCommit
-		if len(commit) > 7 {
-			commit = commit[:7]
-		}
-		row("git", "%s/%s", c.GitBranch, commit)
+	if git := c.gitLabel(); git != "" {
+		row("git", "%s", git)
 	}
 	if c.Makedog != "" {
 		row("makedog", "%s", c.Makedog)

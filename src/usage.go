@@ -26,7 +26,7 @@ func usage() {
 	printStderr("%s\n", boldUnderStyle.Render("Verbs:"))
 	printOption("watch <binary-path>", "Supervise a binary (or script); a path argument implies watch")
 	printOption("<run#>, latest[~N]", "Replay a recorded run (longhand: show <ref>)")
-	printOption("runs", "List this directory's recorded runs")
+	printOption("runs", "List this directory's recorded runs; --long for full cards")
 	printOption("next", "Wait for the next run to begin and stream it from its start")
 	printOption("tail", "Follow live output across restarts, endlessly")
 	printOption("search <regex>", "Grep recorded runs (alias: grep); exit 1 when nothing matches")

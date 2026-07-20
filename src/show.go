@@ -531,6 +531,7 @@ type runSummary struct {
 func runsMain(args []string) {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
 	jsonOut := fs.Bool("json", false, "emit JSONL summaries")
+	long := fs.Bool("long", false, "full metadata cards, as info shows")
 	binary := fs.String("binary", "", "which binary's runs")
 	dir := fs.String("C", "", "project directory (default: current)")
 	fs.Parse(args)
@@ -542,6 +543,11 @@ func runsMain(args []string) {
 	numbers, err := store.runNumbers()
 	if err != nil || len(numbers) == 0 {
 		fatal("no runs recorded for %s", store.meta.Binary)
+	}
+
+	if *long {
+		listRunCards(store, numbers, *jsonOut)
+		return
 	}
 
 	summaries := make([]runSummary, 0, len(numbers))
@@ -568,6 +574,42 @@ func runsMain(args []string) {
 			duration = formatDuration(s.WallNs)
 		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", s.Run, start, duration, s.Exit, s.Reason, s.Git)
+	}
+	tw.Flush()
+}
+
+// listRunCards renders `runs --long`: one full metadata card per run — the
+// same cards info builds — as a wide table, or as JSONL with --json.
+func listRunCards(store *binaryStore, numbers []int, jsonOut bool) {
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		for _, n := range numbers {
+			card, _ := buildRunCard(store, n)
+			enc.Encode(card)
+		}
+		return
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "RUN\tSTART\tDURATION\tCPU\tMEMORY\tEXIT\tREASON\tSIZE\tGIT")
+	for _, n := range numbers {
+		c, _ := buildRunCard(store, n)
+		start, duration, cpu, memory := "?", "", "", ""
+		if !c.Start.IsZero() {
+			start = c.Start.Format("2006-01-02 15:04:05")
+		}
+		if c.WallNs > 0 {
+			duration = formatDuration(c.WallNs)
+		}
+		if c.CPUNs > 0 {
+			cpu = formatDuration(c.CPUNs)
+		}
+		if c.MaxRSS > 0 {
+			memory = formatMemory(c.MaxRSS)
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			c.Run, start, duration, cpu, memory, c.exitLabel(), c.Reason,
+			formatMemory(c.LogSize), c.gitLabel())
 	}
 	tw.Flush()
 }
