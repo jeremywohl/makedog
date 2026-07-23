@@ -105,6 +105,7 @@ func infoMain(args []string) {
 	}
 	fs := newVerbFlags("info")
 	jsonOut := fs.Bool("json", false, "emit the card as one JSON object")
+	fs.BoolVar(jsonOut, "jsonl", false, "emit the card as one JSON object")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, rest)
 	if fs.NArg() > 0 {

@@ -62,6 +62,7 @@ func searchMain(args []string) {
 
 	fs := newVerbFlags("search")
 	jsonOut := fs.Bool("json", false, "emit matching records as JSONL, with run and binary set")
+	fs.BoolVar(jsonOut, "jsonl", false, "emit matching records as JSONL, with run and binary set")
 	plain := fs.Bool("plain", false, "strip ANSI styling from hits")
 	runsFlag := fs.String("runs", "", "limit to a run number or range, like 130..135")
 	since := fs.String("since", "", "only runs active within this age, like 2d or 6h")

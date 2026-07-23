@@ -61,7 +61,7 @@ func usage() {
 	printStderr("\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Shared read options:"))
-	printOption("--json", "Raw JSONL records")
+	printOption("--json, --jsonl", "Raw JSONL records")
 	printOption("--plain", "Strip ANSI styling")
 	printOption("--binary <path>", "Which binary's runs, when several are recorded")
 	printOption("-C <dir>", "Another project directory's runs")

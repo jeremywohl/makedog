@@ -95,6 +95,7 @@ type readFlags struct {
 func newReadFlags(name string, opts *showOptions) *readFlags {
 	fs := newVerbFlags(name)
 	fs.BoolVar(&opts.json, "json", false, "emit raw JSONL records")
+	fs.BoolVar(&opts.json, "jsonl", false, "emit raw JSONL records")
 	fs.BoolVar(&opts.plain, "plain", false, "strip ANSI styling")
 	return &readFlags{
 		fs:      fs,
@@ -531,6 +532,7 @@ type runSummary struct {
 func runsMain(args []string) {
 	fs := newVerbFlags("runs")
 	jsonOut := fs.Bool("json", false, "emit JSONL summaries")
+	fs.BoolVar(jsonOut, "jsonl", false, "emit JSONL summaries")
 	long := fs.Bool("long", false, "full metadata cards, as info shows")
 	binary := fs.String("binary", "", "which binary's runs")
 	dir := fs.String("C", "", "project directory (default: current)")

@@ -296,6 +296,7 @@ func findInstances(dirFlag, binaryFlag string) ([]instanceInfo, error) {
 func statusMain(args []string) {
 	fs := newVerbFlags("status")
 	jsonOut := fs.Bool("json", false, "emit one JSON object per instance")
+	fs.BoolVar(jsonOut, "jsonl", false, "emit one JSON object per instance")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, args)
 
@@ -339,6 +340,7 @@ func statusMain(args []string) {
 func controlMain(req ctrlRequest, args []string) {
 	fs := newVerbFlags(req.Cmd)
 	jsonOut := fs.Bool("json", false, "emit the instance's response as JSON")
+	fs.BoolVar(jsonOut, "jsonl", false, "emit the instance's response as JSON")
 	instance := fs.Int("instance", 0, "target this makedog pid, when several are live")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, args)
