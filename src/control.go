@@ -11,7 +11,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -295,10 +294,10 @@ func findInstances(dirFlag, binaryFlag string) ([]instanceInfo, error) {
 
 // statusMain implements `makedog status`: every live instance in the project.
 func statusMain(args []string) {
-	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	fs := newVerbFlags("status")
 	jsonOut := fs.Bool("json", false, "emit one JSON object per instance")
 	binary, dir := lineageFlags(fs)
-	fs.Parse(args)
+	parseVerbFlags(fs, args)
 
 	instances, err := findInstances(*dir, *binary)
 	if err != nil {
@@ -338,11 +337,11 @@ func statusMain(args []string) {
 // controlMain implements the mutating verbs restart, stop, and start, plus
 // signal (with its name in req.Signal). Ambiguity is an error, never a guess.
 func controlMain(req ctrlRequest, args []string) {
-	fs := flag.NewFlagSet(req.Cmd, flag.ExitOnError)
+	fs := newVerbFlags(req.Cmd)
 	jsonOut := fs.Bool("json", false, "emit the instance's response as JSON")
 	instance := fs.Int("instance", 0, "target this makedog pid, when several are live")
 	binary, dir := lineageFlags(fs)
-	fs.Parse(args)
+	parseVerbFlags(fs, args)
 
 	instances, err := findInstances(*dir, *binary)
 	if err != nil {

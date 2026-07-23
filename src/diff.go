@@ -6,7 +6,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
@@ -36,10 +35,10 @@ func diffMain(args []string) {
 		refB = "latest"
 	}
 
-	fs := flag.NewFlagSet("diff", flag.ExitOnError)
+	fs := newVerbFlags("diff")
 	plain := fs.Bool("plain", false, "no color on change lines")
 	binary, dir := lineageFlags(fs)
-	fs.Parse(rest)
+	parseVerbFlags(fs, rest)
 	if fs.NArg() > 0 {
 		trouble("diff: bad run reference '%s' (a number, or latest[~N])", fs.Arg(0))
 	}

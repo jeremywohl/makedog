@@ -7,7 +7,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"regexp"
@@ -49,6 +48,10 @@ func (r runRange) contains(n int) bool {
 
 // searchMain implements `makedog search <pattern>` (alias: grep).
 func searchMain(args []string) {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		usage()
+		os.Exit(0)
+	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		fatal("search: what pattern?")
 	}
@@ -57,7 +60,7 @@ func searchMain(args []string) {
 		fatal("bad pattern: %v", err)
 	}
 
-	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	fs := newVerbFlags("search")
 	jsonOut := fs.Bool("json", false, "emit matching records as JSONL, with run and binary set")
 	plain := fs.Bool("plain", false, "strip ANSI styling from hits")
 	runsFlag := fs.String("runs", "", "limit to a run number or range, like 130..135")
@@ -65,7 +68,7 @@ func searchMain(args []string) {
 	allBinaries := fs.Bool("all-binaries", false, "search every binary recorded for the project")
 	binary := fs.String("binary", "", "which binary's runs")
 	dir := fs.String("C", "", "project directory (default: current)")
-	fs.Parse(args[1:])
+	parseVerbFlags(fs, args[1:])
 
 	scope := searchScope{}
 	if *runsFlag != "" {

@@ -32,9 +32,9 @@ func lineageFlags(fs *flag.FlagSet) (binary, dir *string) {
 // lineage directory when no ref is given.
 func pathMain(args []string) {
 	ref, rest := splitRef(args)
-	fs := flag.NewFlagSet("path", flag.ExitOnError)
+	fs := newVerbFlags("path")
 	binary, dir := lineageFlags(fs)
-	fs.Parse(rest)
+	parseVerbFlags(fs, rest)
 	if fs.NArg() > 0 {
 		fatal("path: bad run reference '%s' (a number, or latest[~N])", fs.Arg(0))
 	}
@@ -103,10 +103,10 @@ func infoMain(args []string) {
 	if ref == "" {
 		ref = "latest"
 	}
-	fs := flag.NewFlagSet("info", flag.ExitOnError)
+	fs := newVerbFlags("info")
 	jsonOut := fs.Bool("json", false, "emit the card as one JSON object")
 	binary, dir := lineageFlags(fs)
-	fs.Parse(rest)
+	parseVerbFlags(fs, rest)
 	if fs.NArg() > 0 {
 		fatal("info: bad run reference '%s' (a number, or latest[~N])", fs.Arg(0))
 	}

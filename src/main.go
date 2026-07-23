@@ -4,13 +4,10 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -83,25 +80,10 @@ func fatal(format string, args ...any) {
 
 // watchMain implements the watch verb: supervise a binary under the monitor loop.
 func watchMain(args []string) {
-	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.Usage = func() {} // prevent library's usage display
+	fs := newVerbFlags("watch")
 	configPath := fs.String("c", "", "path to config file")
 	fs.StringVar(configPath, "config", "", "path to config file")
-	showHelp := fs.Bool("h", false, "print help")
-	fs.BoolVar(showHelp, "help", false, "print help")
-
-	if err := fs.Parse(args); err != nil {
-		errMsg := regexp.MustCompile(`-(\w{2,})`).ReplaceAllString(err.Error(), `--$1`)
-		fmt.Fprintf(os.Stderr, "makedog: %s\n\n", errMsg)
-		usage()
-		os.Exit(1)
-	}
-
-	if *showHelp {
-		usage()
-		os.Exit(0)
-	}
+	parseVerbFlags(fs, args)
 
 	if fs.NArg() < 1 {
 		fmt.Fprint(os.Stderr, "makedog: no binary?\n\n")

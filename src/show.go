@@ -93,7 +93,7 @@ type readFlags struct {
 }
 
 func newReadFlags(name string, opts *showOptions) *readFlags {
-	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	fs := newVerbFlags(name)
 	fs.BoolVar(&opts.json, "json", false, "emit raw JSONL records")
 	fs.BoolVar(&opts.plain, "plain", false, "strip ANSI styling")
 	return &readFlags{
@@ -107,7 +107,7 @@ func newReadFlags(name string, opts *showOptions) *readFlags {
 
 // parse finalizes the shared flags into opts and resolves the target lineage.
 func (r *readFlags) parse(args []string, opts *showOptions) *binaryStore {
-	r.fs.Parse(args)
+	parseVerbFlags(r.fs, args)
 
 	if *r.until != "" {
 		re, err := regexp.Compile(*r.until)
@@ -529,12 +529,12 @@ type runSummary struct {
 
 // runsMain implements `makedog runs`.
 func runsMain(args []string) {
-	fs := flag.NewFlagSet("runs", flag.ExitOnError)
+	fs := newVerbFlags("runs")
 	jsonOut := fs.Bool("json", false, "emit JSONL summaries")
 	long := fs.Bool("long", false, "full metadata cards, as info shows")
 	binary := fs.String("binary", "", "which binary's runs")
 	dir := fs.String("C", "", "project directory (default: current)")
-	fs.Parse(args)
+	parseVerbFlags(fs, args)
 
 	store, err := openLineage(*dir, *binary)
 	if err != nil {
