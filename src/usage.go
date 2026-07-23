@@ -50,6 +50,10 @@ func usage() {
 	printOption("--timeout <dur>", "Give up after this duration (e.g. 30s), exit 2")
 	printStderr("\n")
 
+	printStderr("%s\n", boldUnderStyle.Render("Runs options:"))
+	printOption("--long", "Full metadata cards, as info shows")
+	printStderr("\n")
+
 	printStderr("%s\n", boldUnderStyle.Render("Search options:"))
 	printOption("--runs <a..b>", "Limit to a run number or range")
 	printOption("--since <age>", "Only runs active within this age, like 2d or 6h")
@@ -60,7 +64,7 @@ func usage() {
 	printOption("--instance <pid>", "Target this makedog pid, when several are live")
 	printStderr("\n")
 
-	printStderr("%s\n", boldUnderStyle.Render("Shared read options:"))
+	printStderr("%s\n", boldUnderStyle.Render("Shared options (all but watch):"))
 	printOption("--json, --jsonl", "Raw JSONL records")
 	printOption("--plain", "Strip ANSI styling")
 	printOption("--binary <path>", "Which binary's runs, when several are recorded")
