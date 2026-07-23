@@ -15,7 +15,7 @@ var (
 
 // usage prints the help message.
 func usage() {
-	printStderr("A development tool for server binaries: watch and restart, record and replay runs, run make targets, and more\n\n")
+	printStderr("A runner for server binaries: restart on builds, log every run, send signals, run make targets, and more\n\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Usage:"))
 	printStderr("  %s watch [OPTIONS] <binary-path>\n", boldStyle.Render("makedog"))

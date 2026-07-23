@@ -1,0 +1,334 @@
+.\" Manual page for makedog.
+.TH MAKEDOG 1 2026-07-23 "makedog" "User Commands"
+.SH NAME
+makedog \- a runner for server binaries: restart on builds, log every
+run, send signals, run make targets, and more
+.SH SYNOPSIS
+.B makedog
+.B watch
+[\fIOPTIONS\fR] \fIbinary-path\fR
+.br
+.B makedog
+\fIrun#\fR|\fBlatest\fR[\fB~\fIN\fR] [\fIOPTIONS\fR]
+.br
+.B makedog
+.BR runs | next | tail
+[\fIOPTIONS\fR]
+.br
+.B makedog
+.B search
+\fIregex\fR [\fIOPTIONS\fR]
+.br
+.B makedog
+.BR status | restart | stop | start
+[\fIOPTIONS\fR]
+.br
+.B makedog
+.B signal
+\fIname\fR [\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B makedog
+supervises a server binary during development. It starts the binary,
+watches the compiled file for changes, and restarts the process when a
+new build lands. It deliberately does not watch source code or drive
+recompilation; that is left to your editor, agent, or build system.
+.PP
+A \fIrun\fR is one execution of your binary, from start to
+exit. And many runs are grouped into a \fIlineage\fR.
+.PP
+Your \fIproject\fR is your working directory. We anchor from here to
+find binaries, read configs, and match runs & logs. A project can
+have many binaries, each with its own lineage. A binary inside
+the project is identified by its relative path, so \fIbin/server\fR,
+\fI./bin/server\fR, or its full path, name one lineage.
+.PP
+Discovery favors convenience over exactness. Generally, an
+unspecified run means the latest, and an unspecified binary means the
+most recently active one. Also, a renamed or moved binary starts a
+fresh lineage rather than erroring.
+.PP
+A bare path argument implies
+.BR watch .
+A bare run reference implies
+.BR show .
+For example, paths include slashes, like \fI./path\fR or \fIbin/name\fR.
+Run references look like \fB33\fR, or
+.BR latest [\fB~\fIN\fR].
+.PP
+Every run is recorded to a durable per-project store as JSONL, one
+record per output line plus lifecycle events, and can be replayed,
+tailed, searched, and diffed later. Older logs are compressed in the
+background, and pruned per the retention policy (see
+.B CONFIGURATION
+below).
+.PP
+A running instance listens on a unix socket, so a second terminal can
+query status, restart or stop the binary, or deliver signals remotely.
+.PP
+Each project can customize the signal menu. Taper the list and name
+each signal (e.g. "reload config"). See
+.B CONFIGURATION
+below.
+.SH VERBS
+.TP
+.BI watch " binary-path"
+Supervise a binary (or script). Restarts it when the file's
+modification time changes, logs the run, and accepts interactive
+keypresses (see
+.B INTERACTIVE KEYS
+below).
+.TP
+\fIrun#\fR, \fBlatest\fR[\fB~\fIN\fR]
+Replay a recorded run (longhand:
+.B show
+\fIref\fR).
+.B latest~1
+is the run before the latest, and so on.
+.TP
+.B runs
+List this directory's recorded runs;
+.B \-\-long
+prints full metadata cards.
+.TP
+.B next
+Wait for the next run to begin and stream it from its start.
+.TP
+.B tail
+Follow live output across restarts, endlessly.
+.TP
+.BI search " regex"
+Grep recorded runs (alias:
+.BR grep );
+exits 1 when nothing matches.
+.TP
+.BR info " [\fIref\fR]"
+One run's metadata card, default latest;
+.B \-\-json
+emits one object.
+.TP
+.BR path " [\fIref\fR]"
+Print a run log's file path; with no ref, the lineage directory.
+.TP
+.BR diff " [\fIa\fR [\fIb\fR]]"
+Unified diff of two runs' output, default latest~1 vs latest.
+.TP
+.B status
+List live makedog instances for the project.
+.TP
+.BR restart ", " stop ", " start
+Command a live instance's binary remotely.
+.TP
+.BI signal " name"
+Send the supervised binary a signal remotely, e.g. HUP or USR1.
+.SH OPTIONS
+.SS Watch options
+.TP
+.BR \-c ", " \-\-config " \fIpath\fR"
+Path to a specific configuration file, rather than searching for one.
+.SS Read options (show, next, tail)
+.TP
+.BR \-f ", " \-\-follow
+Keep streaming until the run exits (show).
+.TP
+.BI \-n " count"
+Only the last \fIcount\fR records.
+.TP
+.BI \-\-since " age"
+Only records within this age, like 30s or 5m (show).
+.TP
+.BI \-\-until " regex"
+Stream until a line matches: exit 0 if matched, 1 if the run ended
+first.
+.TP
+.BI \-\-timeout " duration"
+Give up after this duration (e.g. 30s), exit 2.
+.SS Runs options
+.TP
+.B \-\-long
+Full metadata cards, as
+.B info
+shows.
+.SS Search options
+.TP
+.BI \-\-runs " a..b"
+Limit to a run number or range.
+.TP
+.BI \-\-since " age"
+Only runs active within this age, like 2d or 6h.
+.TP
+.B \-\-all\-binaries
+Search every binary recorded for the project.
+.SS Control options (status, restart, stop, start, signal)
+.TP
+.BI \-\-instance " pid"
+Target this makedog pid, when several are live. Mutating verbs require
+it whenever more than one instance is running.
+.SS Shared options (all but watch)
+.TP
+.BR \-\-json ", " \-\-jsonl
+Emit raw JSONL records.
+.TP
+.B \-\-plain
+Strip ANSI styling.
+.TP
+.BI \-\-binary " path"
+Which binary's runs, when several are recorded for the project.
+.TP
+.BI \-C " dir"
+Operate on another project directory's runs.
+.TP
+.BR \-h ", " \-\-help
+Print help.
+.SH INTERACTIVE KEYS
+While watching, makedog reads single keypresses from the terminal:
+.TP
+.B c
+Clear the screen.
+.TP
+.B h
+Show key help.
+.TP
+.B k
+Write a mark into the run log.
+.TP
+.B m
+Run make.
+.TP
+.B q
+Quit makedog.
+.TP
+.B r
+Restart the binary.
+.TP
+.B s
+Choose a signal from a menu and send it to the binary.
+.TP
+.B t
+Choose a make target from a menu and run it.
+.TP
+.B x
+Start or stop the binary.
+.SH CONFIGURATION
+On
+.BR watch ,
+makedog loads
+.B .makedog.toml
+from the current directory (or the file named by
+.BR \-\-config ).
+A missing file is fine; a malformed one is ignored with a warning.
+.SS [[signals]]
+Configured signals replace the default
+.B s
+menu, which then offers only these, in config order. The remote
+.B signal
+verb is unaffected:
+.PP
+.RS
+.nf
+[[signals]]
+signal = "USR1"
+name   = "rotate logs"   # optional display name
+.fi
+.RE
+.SS [logs]
+Tunes run log retention. A watch-mode makedog runs one maintenance pass
+shortly after startup, compressing idle runs with zstd and pruning by
+count, age, and total size. The newest two runs are never touched.
+Setting a field to zero disables that rule.
+.TP
+.B compress_after
+Compress runs idle longer than this (default "24h").
+.TP
+.B keep_runs
+Keep at most this many runs (default 500).
+.TP
+.B max_age
+Delete runs idle longer than this, e.g. "90d" (default: never).
+.TP
+.B max_total
+Delete oldest runs while the lineage exceeds this size, e.g. "512MB"
+(default: unlimited).
+.SH STOP SEMANTICS
+However a stop arrives \(em a rebuild restart, the
+.B r
+or
+.B x
+keys, a remote
+.BR stop " or " restart ,
+or makedog itself exiting \(em the binary first receives SIGTERM and
+two seconds to exit gracefully. An unresponsive process is then dealt
+SIGKILL, noted in the log. Output produced during shutdown is drained
+into the run log before it is sealed.
+.SH FILES
+.TP
+.B .makedog.toml
+Per-project configuration, read from the working directory.
+.TP
+.B ~/.local/state/makedog
+The run store. Each (working directory, binary path) pair owns a
+lineage of numbered runs. Overridden by
+.BR MAKEDOG_STATE_DIR .
+.SH ENVIRONMENT
+.TP
+.B MAKEDOG_STATE_DIR
+Base directory of the run store, in place of ~/.local/state/makedog.
+.TP
+.B XDG_STATE_HOME
+Honored when
+.B MAKEDOG_STATE_DIR
+is unset: the store lives in $XDG_STATE_HOME/makedog.
+.TP
+.B PAGER
+Pager for replayed runs when stdout is a terminal (default "less
+\-FRX").
+.SH EXIT STATUS
+.B search
+exits 0 on a match, 1 when nothing matches. With
+.BR \-\-until ,
+readers exit 0 when a line matches, 1 when the run ends first, and 2 on
+.B \-\-timeout
+expiry. Other verbs exit 0 on success and nonzero on error.
+.SH EXAMPLES
+Supervise a server and restart it whenever it is rebuilt:
+.PP
+.RS
+.nf
+makedog bin/server
+.fi
+.RE
+.PP
+Replay the previous run, plainly, through the pager:
+.PP
+.RS
+.nf
+makedog latest~1 \-\-plain
+.fi
+.RE
+.PP
+Block until the server reports readiness, or give up after 30 seconds:
+.PP
+.RS
+.nf
+makedog next \-\-until 'listening on' \-\-timeout 30s
+.fi
+.RE
+.PP
+Search the last two days of runs for errors:
+.PP
+.RS
+.nf
+makedog search 'ERROR|panic' \-\-since 2d
+.fi
+.RE
+.PP
+Tell the running server to reload its config, from another terminal:
+.PP
+.RS
+.nf
+makedog signal HUP
+.fi
+.RE
+.SH SEE ALSO
+.BR make (1),
+.BR kill (1),
+.BR less (1)
