@@ -72,8 +72,8 @@ func startRun(binaryPath string, number int, logFile *os.File) (*run, error) {
 	if binaryHash != "" {
 		msg += fmt.Sprintf(", hash %s", binaryHash[:7])
 	}
-	if gitBranch != "" && gitCommit != "" {
-		msg += fmt.Sprintf(", git %s/%s", gitBranch, gitCommit[:7])
+	if git := gitLabel(gitBranch, gitCommit); git != "" {
+		msg += fmt.Sprintf(", git %s", git)
 	}
 	msg += ")"
 

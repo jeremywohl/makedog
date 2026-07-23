@@ -286,19 +286,33 @@ func getBinaryHash(binaryPath string) (string, error) {
 	return hash, nil
 }
 
-// getGitInfo retrieves both the current git branch name and full commit hash in a single call.
-// Returns (branch, commit, error).
+// getGitInfo captures the checked-out branch name and full HEAD commit —
+// the branch by identity, not by which branches point at HEAD's commit,
+// since several routinely coincide around fast-forward merges. A detached
+// HEAD yields an empty branch with the commit still filled.
 func getGitInfo() (string, string, error) {
-	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:short) %(objectname)", "--points-at", "HEAD", "refs/heads")
-	output, err := cmd.Output()
+	output, err := exec.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		return "", "", err
 	}
+	commit := strings.TrimSpace(string(output))
 
-	parts := strings.Fields(strings.TrimSpace(string(output)))
-	if len(parts) != 2 {
-		return "", "", nil
+	// Exits nonzero when detached; the commit alone still places the run.
+	name, _ := exec.Command("git", "symbolic-ref", "--short", "-q", "HEAD").Output()
+	return strings.TrimSpace(string(name)), commit, nil
+}
+
+// gitLabel renders a git position compactly: branch/abbrev, or the bare
+// abbreviated commit when recorded on a detached HEAD, or nothing.
+func gitLabel(branch, commit string) string {
+	if len(commit) > 7 {
+		commit = commit[:7]
 	}
-
-	return parts[0], parts[1], nil
+	switch {
+	case branch != "" && commit != "":
+		return branch + "/" + commit
+	case branch != "":
+		return branch
+	}
+	return commit
 }

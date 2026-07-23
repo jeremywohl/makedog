@@ -97,18 +97,6 @@ func (c runCard) exitLabel() string {
 	return "?"
 }
 
-// gitLabel renders a card's git position as branch/abbrev, or nothing.
-func (c runCard) gitLabel() string {
-	if c.GitBranch == "" {
-		return ""
-	}
-	commit := c.GitCommit
-	if len(commit) > 7 {
-		commit = commit[:7]
-	}
-	return c.GitBranch + "/" + commit
-}
-
 // infoMain implements `makedog info [ref]`, defaulting to latest.
 func infoMain(args []string) {
 	ref, rest := splitRef(args)
@@ -234,7 +222,7 @@ func renderRunCard(c runCard) {
 	if c.Hash != "" {
 		row("hash", "%s", c.Hash[:min(7, len(c.Hash))])
 	}
-	if git := c.gitLabel(); git != "" {
+	if git := gitLabel(c.GitBranch, c.GitCommit); git != "" {
 		row("git", "%s", git)
 	}
 	if c.Makedog != "" {

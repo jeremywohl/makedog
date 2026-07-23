@@ -609,7 +609,7 @@ func listRunCards(store *binaryStore, numbers []int, jsonOut bool) {
 		}
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			c.Run, start, duration, cpu, memory, c.exitLabel(), c.Reason,
-			formatMemory(c.LogSize), c.gitLabel())
+			formatMemory(c.LogSize), gitLabel(c.GitBranch, c.GitCommit))
 	}
 	tw.Flush()
 }
@@ -629,13 +629,7 @@ func summarizeRun(store *binaryStore, number int) runSummary {
 
 	if meta.T == recMeta {
 		s.Start = meta.TS
-		if meta.GitBranch != "" {
-			commit := meta.GitCommit
-			if len(commit) > 7 {
-				commit = commit[:7]
-			}
-			s.Git = meta.GitBranch + "/" + commit
-		}
+		s.Git = gitLabel(meta.GitBranch, meta.GitCommit)
 	}
 
 	switch {

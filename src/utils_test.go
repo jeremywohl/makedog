@@ -3,6 +3,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
@@ -199,5 +200,72 @@ func TestRunCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// gitRepo lays out a throwaway repo with one commit and chdirs into it.
+func gitRepo(t *testing.T) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestGetGitInfo(t *testing.T) {
+	t.Run("names the checked-out branch", func(t *testing.T) {
+		gitRepo(t)
+		branch, commit, err := getGitInfo()
+		if err != nil || branch != "main" || len(commit) != 40 {
+			t.Errorf("= %q, %q, %v", branch, commit, err)
+		}
+	})
+
+	t.Run("unmoved by other branches at the same commit", func(t *testing.T) {
+		gitRepo(t)
+		exec.Command("git", "branch", "task-branch").Run()
+		branch, commit, err := getGitInfo()
+		if err != nil || branch != "main" || len(commit) != 40 {
+			t.Errorf("= %q, %q, %v", branch, commit, err)
+		}
+	})
+
+	t.Run("detached HEAD keeps the commit", func(t *testing.T) {
+		gitRepo(t)
+		exec.Command("git", "checkout", "-q", "--detach").Run()
+		branch, commit, err := getGitInfo()
+		if err != nil || branch != "" || len(commit) != 40 {
+			t.Errorf("= %q, %q, %v", branch, commit, err)
+		}
+	})
+
+	t.Run("unborn repo yields nothing", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if out, err := exec.Command("git", "init", "-q").CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v\n%s", err, out)
+		}
+		branch, commit, err := getGitInfo()
+		if err == nil || branch != "" || commit != "" {
+			t.Errorf("= %q, %q, %v", branch, commit, err)
+		}
+	})
+}
+
+func TestGitLabel(t *testing.T) {
+	long := "64e590079ad6cd2220831cbb0b89ab7df72fd73e"
+	for _, tt := range []struct{ branch, commit, want string }{
+		{"main", long, "main/64e5900"},
+		{"", long, "64e5900"},
+		{"main", "", "main"},
+		{"", "", ""},
+	} {
+		if got := gitLabel(tt.branch, tt.commit); got != tt.want {
+			t.Errorf("gitLabel(%q, %q) = %q; want %q", tt.branch, tt.commit, got, tt.want)
+		}
 	}
 }
