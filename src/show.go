@@ -1,11 +1,12 @@
 // Read-side verbs: replay a recorded run (optionally following it live),
-// wait on the next run, tail a lineage across restarts, and list run history.
-// Rendering mirrors the terminal sink, so a replayed log reads like the
-// original session. Snapshot output pages on a terminal and streams raw when
-// piped; only the explicitly blocking forms (--follow, --until, next, tail)
-// keep the process alive, so tool callers never hang by default. Blocking
-// forms exit 0 on success or an --until match, 1 when the run ends before a
-// match, and 2 on --timeout.
+// gate on the run of the binary as built, wait on the next run, tail a
+// lineage across restarts, and list run history. Rendering mirrors the
+// terminal sink, so a replayed log reads like the original session. Snapshot
+// output pages on a terminal and streams raw when piped; only the explicitly
+// blocking forms (--follow, --until, current, next, tail) keep the process
+// alive, so tool callers never hang by default. Blocking forms exit 0 on
+// success or an --until match, 1 when the run ends before a match, and 2 on
+// --timeout.
 package main
 
 import (
@@ -17,6 +18,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -163,6 +165,104 @@ func showMain(refArg string, args []string) {
 	if status != 0 {
 		os.Exit(status)
 	}
+}
+
+// currentMain implements `makedog current`: show the run of the binary as it
+// stands on disk. When the newest run already carries the on-disk hash — live
+// or sealed — it renders exactly as `show latest` would; otherwise wait for
+// that run to begin. Selection says which run; --until and exit codes say how
+// it went.
+func currentMain(args []string) {
+	opts := showOptions{}
+	rf := newReadFlags("current", &opts)
+	rf.fs.BoolVar(&opts.follow, "f", false, "follow output as it arrives")
+	rf.fs.BoolVar(&opts.follow, "follow", false, "follow output as it arrives")
+	rf.fs.IntVar(&opts.lastN, "n", 0, "only the last N records")
+	since := rf.fs.String("since", "", "only records within this age, like 30s or 5m")
+	store := rf.parse(args, &opts)
+	if *since != "" {
+		age, err := parseAge(*since)
+		if err != nil {
+			fatal("bad --since: %v", err)
+		}
+		opts.since = time.Now().Add(-age)
+	}
+
+	number, ok := waitForCurrentRun(store, &opts)
+	if !ok {
+		os.Exit(2)
+	}
+
+	status, err := showRun(store, number, opts)
+	if err != nil {
+		fatal("%v", err)
+	}
+	if status != 0 {
+		os.Exit(status)
+	}
+}
+
+// waitForCurrentRun polls until the lineage's newest run was started from the
+// binary as it stands on disk, re-hashing the binary each round so a build
+// landing mid-wait still converges. States that cannot converge on their own
+// — an unreadable binary, runs recorded without hashes, no supervising
+// instance — warn once and keep waiting; only the deadline gives up.
+func waitForCurrentRun(store *binaryStore, opts *showOptions) (int, bool) {
+	binPath := store.meta.Binary
+	if !filepath.IsAbs(binPath) {
+		binPath = filepath.Join(store.meta.Cwd, binPath)
+	}
+
+	warned := map[string]bool{}
+	warnOnce := func(key, format string, args ...any) {
+		if !warned[key] {
+			warned[key] = true
+			fmt.Fprintf(os.Stderr, "makedog: "+format+"\n", args...)
+		}
+	}
+
+	for {
+		diskHash, err := getBinaryHash(binPath)
+		switch number, runHash := newestRunHash(store); {
+		case err != nil:
+			warnOnce("binary", "cannot read %s (%v); waiting for a build", store.meta.Binary, err)
+		case number != 0 && runHash == diskHash:
+			return number, true
+		case number != 0 && runHash == "":
+			warnOnce("nohash", "newest run of %s records no binary hash; waiting for one that does", store.meta.Binary)
+		}
+
+		warnOnce("waiting", "waiting for a run of %s as built", store.meta.Binary)
+		if len(store.liveInstances()) == 0 {
+			warnOnce("instances", "no makedog is supervising %s; waiting anyway", store.meta.Binary)
+		}
+		if opts.expired() {
+			fmt.Fprintln(os.Stderr, "makedog: timeout")
+			return 0, false
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// newestRunHash reports the newest run's number and the binary hash its
+// header records; zero and empty stand for no runs and no (or not yet
+// written) header.
+func newestRunHash(store *binaryStore) (int, string) {
+	numbers, err := store.runNumbers()
+	if err != nil || len(numbers) == 0 {
+		return 0, ""
+	}
+	number := numbers[len(numbers)-1]
+	first, _, err := firstAndLastLines(store, number)
+	if err != nil {
+		return number, ""
+	}
+	var meta record
+	json.Unmarshal([]byte(first), &meta)
+	if meta.T != recMeta {
+		return number, ""
+	}
+	return number, meta.Hash
 }
 
 // nextMain implements `makedog next`: wait for a run newer than the current

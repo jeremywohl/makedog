@@ -40,6 +40,8 @@ func main() {
 		showMain(args[1], args[2:])
 	case first == "runs":
 		runsMain(args[1:])
+	case first == "current":
+		currentMain(args[1:])
 	case first == "next":
 		nextMain(args[1:])
 	case first == "tail":

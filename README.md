@@ -4,11 +4,11 @@ A runner for server binaries: restart on builds, log every run, send signals, ru
 
 - **Restarts on builds** — watches the compiled binary, not your source. Recompiling is your editor's or your agent's job; makedog notices the new build and bounces the process.
 - **Logs every run** — each execution is recorded to a durable store: replay it, tail it, diff two runs, grep the last week.
-- **Live everywhere** — other shells and agents watch in real time: `tail` follows output across restarts, `next` catches the coming run from its first line, `--follow` streams one in flight.
+- **Live everywhere** — other shells and agents watch in real time: `tail` follows output across restarts, `current` gates on the run of the build on disk, `next` catches the coming run from its first line, `--follow` streams one in flight.
 - **Sends signals** — from an interactive menu, or remotely from another terminal.
 - **Runs make targets** — pick a Makefile target from within the watch session.
 - **Remote control** — every instance listens on a unix socket: `status`, `restart`, `stop`, `start`, `signal` from anywhere in the project.
-- **Agent-friendly** — `--json` output, and readiness gates like `next --until 'listening' --timeout 30s` with meaningful exit codes.
+- **Agent-friendly** — `--json` output, and readiness gates like `current --until 'listening' --timeout 30s` with meaningful exit codes.
 
 ## Examples
 
@@ -46,13 +46,13 @@ $ makedog diff                 # what changed between the last two runs?
 $ makedog search 'ERROR|panic' --since 2d
 ```
 
-Gate on readiness — wait for the next run to say it's up:
+Gate on readiness — after a rebuild, wait for the run of the binary now on disk to say it's up:
 
 ```console
-$ makedog next --until 'listening on' --timeout 30s
+$ make && makedog current --until 'listening on' --timeout 30s
 ```
 
-Exit 0 when the line matches, 1 if the run ends first, 2 on timeout.
+Exit 0 when the line matches, 1 if the run ends first, 2 on timeout. `current` keys on the binary's hash, so it works called at any point after the build: it returns at once when that run is already up (even if a no-op build restarted nothing), and waits for the restart otherwise. (`next` remains the pure event form — wait for whatever run starts next.)
 
 Poke the live process from another terminal:
 
@@ -75,8 +75,10 @@ The server runs under makedog, which restarts it whenever the binary
 is rebuilt. Every run's output and status are logged and readable in
 real time — never start, stop, or kill the server process yourself.
 
-- Verify it came up: `makedog next --until 'listening on' --timeout 30s`
-  (exit 0 = up, 1 = run ended first, 2 = timeout).
+- After a rebuild, verify the new build came up:
+  `makedog current --until 'listening on' --timeout 30s`
+  (exit 0 = up, 1 = run ended first, 2 = timeout). It gates on the
+  run of the binary now on disk, so call it any time after the build.
 - Read output: `makedog latest --plain` (`-f` streams, `-n 100` and
   `--since 5m` trim, `--json` emits JSONL records).
 - Inspect a run: `makedog info --json` — one object of metadata:
@@ -97,6 +99,7 @@ Read them with:
 |---|---|
 | `runs` | list recorded runs (`--long` for full metadata cards) |
 | `<run#>`, `latest[~N]` | replay a run (`--follow` to stream a live one) |
+| `current` | the run of the binary as built on disk, waiting for it if needed |
 | `next` | wait for the next run and stream it from its start |
 | `tail` | follow live output across restarts, endlessly |
 | `search <regex>` | grep recorded runs; `--runs 30..34`, `--since 6h`, `--all-binaries` |

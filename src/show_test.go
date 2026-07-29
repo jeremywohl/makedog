@@ -60,6 +60,12 @@ func metaRec(number, pid int) record {
 	return record{T: recMeta, TS: time.Now(), Run: number, Binary: "child", Pid: pid}
 }
 
+func metaRecHash(number, pid int, hash string) record {
+	r := metaRec(number, pid)
+	r.Hash = hash
+	return r
+}
+
 func lineRec(s string) record {
 	return record{T: recLine, TS: time.Now(), S: s}
 }
@@ -168,6 +174,86 @@ func TestNext(t *testing.T) {
 		out, code := readVerb(t, proj, state, 5*time.Second, "next", "--timeout", "600ms")
 		if code != 2 {
 			t.Errorf("exit = %d; want 2; output:\n%s", code, out)
+		}
+	})
+}
+
+// writeBinary puts the watched binary itself on disk and returns its hash,
+// the value a run started from this build would record.
+func writeBinary(t *testing.T, projDir, content string) string {
+	t.Helper()
+	path := filepath.Join(projDir, "child")
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := getBinaryHash(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hash
+}
+
+func TestCurrent(t *testing.T) {
+	staleHash := strings.Repeat("0", 64)
+
+	t.Run("shows the run of the on-disk binary immediately", func(t *testing.T) {
+		proj, state, lineage := fixtureStore(t)
+		hash := writeBinary(t, proj, "build one")
+		writeRun(t, lineage, 1, []record{metaRecHash(1, os.Getpid(), hash), lineRec("listening on :8080"), exitRec()})
+
+		out, code := readVerb(t, proj, state, 5*time.Second, "current", "--plain")
+		if code != 0 {
+			t.Fatalf("exit = %d; want 0; output:\n%s", code, out)
+		}
+		if !strings.Contains(out, "listening on :8080") {
+			t.Errorf("output missing the run's line:\n%s", out)
+		}
+		if strings.Contains(out, "waiting") {
+			t.Errorf("immediate match should not wait:\n%s", out)
+		}
+	})
+
+	t.Run("waits until the build's run appears", func(t *testing.T) {
+		proj, state, lineage := fixtureStore(t)
+		hash := writeBinary(t, proj, "build two")
+		writeRun(t, lineage, 1, []record{metaRecHash(1, os.Getpid(), staleHash), lineRec("old build"), exitRec()})
+
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			writeRun(t, lineage, 2, []record{metaRecHash(2, os.Getpid(), hash), lineRec("ready to serve"), exitRec()})
+		}()
+
+		out, code := readVerb(t, proj, state, 10*time.Second, "current", "--until", "ready", "--timeout", "5s")
+		if code != 0 {
+			t.Errorf("exit = %d; want 0; output:\n%s", code, out)
+		}
+	})
+
+	t.Run("times out at 2 while a stale run persists", func(t *testing.T) {
+		proj, state, lineage := fixtureStore(t)
+		writeBinary(t, proj, "build three")
+		writeRun(t, lineage, 1, []record{metaRecHash(1, os.Getpid(), staleHash), lineRec("old build"), exitRec()})
+
+		out, code := readVerb(t, proj, state, 5*time.Second, "current", "--timeout", "600ms")
+		if code != 2 {
+			t.Errorf("exit = %d; want 2; output:\n%s", code, out)
+		}
+		if !strings.Contains(out, "no makedog is supervising") {
+			t.Errorf("expected the unsupervised warning:\n%s", out)
+		}
+	})
+
+	t.Run("crashed run of the current build still shows, exit 1 under --until", func(t *testing.T) {
+		proj, state, lineage := fixtureStore(t)
+		hash := writeBinary(t, proj, "build four")
+		writeRun(t, lineage, 1, []record{metaRecHash(1, os.Getpid(), hash), lineRec("panic: boom"), exitRec()})
+
+		out, code := readVerb(t, proj, state, 5*time.Second, "current", "--until", "listening on", "--plain")
+		if code != 1 {
+			t.Errorf("exit = %d; want 1; output:\n%s", code, out)
+		}
+		if !strings.Contains(out, "panic: boom") {
+			t.Errorf("crash output should be shown:\n%s", out)
 		}
 	})
 }

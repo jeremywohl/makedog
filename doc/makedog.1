@@ -12,7 +12,7 @@ run, send signals, run make targets, and more
 \fIrun#\fR|\fBlatest\fR[\fB~\fIN\fR] [\fIOPTIONS\fR]
 .br
 .B makedog
-.BR runs | next | tail
+.BR runs | current | next | tail
 [\fIOPTIONS\fR]
 .br
 .B makedog
@@ -33,6 +33,17 @@ watches the compiled file for changes, and restarts the process when a
 new build lands. It deliberately does not watch source code or drive
 recompilation; that is left to your editor, agent, or build system.
 .PP
+What it supervises is live everywhere: other terminals and agents can
+watch in real time, without holding the process themselves.
+.B tail
+follows output across restarts,
+.B current
+gates on the run of the build now on disk,
+.B next
+catches a coming run from its first line, and
+.B \-\-follow
+streams one already in flight.
+.PP
 A \fIrun\fR is one execution of your binary, from start to
 exit. And many runs are grouped into a \fIlineage\fR.
 .PP
@@ -43,14 +54,16 @@ the project is identified by its relative path, so \fIbin/server\fR,
 \fI./bin/server\fR, or its full path, name one lineage.
 .PP
 Discovery favors convenience over exactness. Generally, an
-unspecified run means the latest, and an unspecified binary means the
+unspecified run means the most recent, and an unspecified binary means the
 most recently active one. Also, a renamed or moved binary starts a
 fresh lineage rather than erroring.
 .PP
 A bare path argument implies
 .BR watch .
 A bare run reference implies
-.BR show .
+.BR show
+/
+.BR latest.
 For example, paths include slashes, like \fI./path\fR or \fIbin/name\fR.
 Run references look like \fB33\fR, or
 .BR latest [\fB~\fIN\fR].
@@ -90,6 +103,18 @@ List this directory's recorded runs;
 .B \-\-long
 prints full metadata cards.
 .TP
+.B current
+Show the run of the current binary on disk, possibly waiting for it to begin.
+Contrast
+.BR latest ,
+the most recent (or live) run whatever binary produced it, and
+.BR next ,
+whatever run starts next.
+Runs are matched by the binary's
+hash, so
+.B current
+may be called at any point after a build.
+.TP
 .B next
 Wait for the next run to begin and stream it from its start.
 .TP
@@ -125,16 +150,16 @@ Send the supervised binary a signal remotely, e.g. HUP or USR1.
 .TP
 .BR \-c ", " \-\-config " \fIpath\fR"
 Path to a specific configuration file, rather than searching for one.
-.SS Read options (show, next, tail)
+.SS Read options (show, current, next, tail)
 .TP
 .BR \-f ", " \-\-follow
-Keep streaming until the run exits (show).
+Keep streaming until the run exits (show, current).
 .TP
 .BI \-n " count"
 Only the last \fIcount\fR records.
 .TP
 .BI \-\-since " age"
-Only records within this age, like 30s or 5m (show).
+Only records within this age, like 30s or 5m (show, current).
 .TP
 .BI \-\-until " regex"
 Stream until a line matches: exit 0 if matched, 1 if the run ended
@@ -305,11 +330,12 @@ makedog latest~1 \-\-plain
 .fi
 .RE
 .PP
-Block until the server reports readiness, or give up after 30 seconds:
+Rebuild, then block until the new build reports readiness, or give up
+after 30 seconds:
 .PP
 .RS
 .nf
-makedog next \-\-until 'listening on' \-\-timeout 30s
+make && makedog current \-\-until 'listening on' \-\-timeout 30s
 .fi
 .RE
 .PP
