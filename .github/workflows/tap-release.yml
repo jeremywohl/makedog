@@ -1,0 +1,55 @@
+# On a published GitHub release, bump the Homebrew formula in
+# jeremywohl/homebrew-tap to the new tag's source tarball.
+#
+# Requires a TAP_PUSH_TOKEN repository secret: a fine-grained PAT with
+# contents read/write on jeremywohl/homebrew-tap.
+
+name: Update Homebrew tap
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  bump-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches src/version.go
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          WANT="${TAG#v}"
+          GOT=$(sed -n 's/^const version = "\(.*\)"$/\1/p' src/version.go)
+          if [ "$GOT" != "$WANT" ]; then
+            echo "tag $TAG but src/version.go says $GOT" >&2
+            exit 1
+          fi
+
+      - name: Compute tarball checksum
+        id: tarball
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          SHA=$(curl -fsSL "$URL" | sha256sum | cut -d' ' -f1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Check out tap
+        uses: actions/checkout@v4
+        with:
+          repository: jeremywohl/homebrew-tap
+          token: ${{ secrets.TAP_PUSH_TOKEN }}
+
+      - name: Bump formula and push
+        run: |
+          sed -i \
+            -e 's|^  url ".*"$|  url "${{ steps.tarball.outputs.url }}"|' \
+            -e 's|^  sha256 ".*"$|  sha256 "${{ steps.tarball.outputs.sha }}"|' \
+            Formula/makedog.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "makedog ${{ steps.tarball.outputs.tag }}"
+          git push

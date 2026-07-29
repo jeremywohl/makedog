@@ -73,6 +73,7 @@ func usage() {
 
 	printStderr("%s\n", boldUnderStyle.Render("Options:"))
 	printOption("-h, --help", "Print help")
+	printOption("--version", "Print version")
 }
 
 func printStderr(format string, a ...any) {

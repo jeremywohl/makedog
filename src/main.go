@@ -13,13 +13,6 @@ import (
 	"time"
 )
 
-// Build identity, stamped by the Makefile via -ldflags.
-var (
-	Version   = "dev"
-	Commit    = "unknown"
-	BuildTime = ""
-)
-
 // main dispatches on the first argument: a verb, a run reference (show
 // sugar), or a slash-bearing or flag-led token (watch sugar). Bare words in
 // first position belong to makedog; a binary is always reachable as ./name.
@@ -34,6 +27,9 @@ func main() {
 	switch first := args[0]; {
 	case first == "-h" || first == "--help":
 		usage()
+		os.Exit(0)
+	case first == "version" || first == "--version":
+		fmt.Printf("makedog %s\n", version)
 		os.Exit(0)
 	case first == "watch":
 		watchMain(args[1:])

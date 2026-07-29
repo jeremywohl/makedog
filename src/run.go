@@ -62,7 +62,7 @@ func startRun(binaryPath string, number int, logFile *os.File) (*run, error) {
 		r.log.write(record{
 			T: recMeta, TS: r.startTime, Run: number, Binary: binaryPath, Cwd: cwd,
 			Pid: cmd.Process.Pid, Hash: binaryHash, GitBranch: gitBranch, GitCommit: gitCommit,
-			Makedog: Version,
+			Makedog: version,
 		})
 		out.attach(r.log)
 	}
