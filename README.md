@@ -72,7 +72,8 @@ Paste this into your `CLAUDE.md` / `AGENTS.md` and your agent can rebuild, confi
 ## Running the server
 
 The server runs under makedog, which restarts it whenever the binary
-is rebuilt. Never start, stop, or kill the server process yourself.
+is rebuilt. Every run's output and status are logged and readable in
+real time — never start, stop, or kill the server process yourself.
 
 - Verify it came up: `makedog next --until 'listening on' --timeout 30s`
   (exit 0 = up, 1 = run ended first, 2 = timeout).
