@@ -16,7 +16,7 @@ Supervise a server; rebuilds restart it automatically:
 
 ```console
 $ makedog bin/server
-keys: 'c' to clear screen, 'h' for this help, 'k' to mark log, 'm' to run make, 'q' to quit, 't' to run make targets, 'x' to start/stop
+keys: 'c' to clear screen, 'h' for this help, 'k' to mark log, 'm' to run make, 'q' to quit, 's' to send signal, 't' to run make targets, 'x' to start/stop
 
 --> start 1 bin/server (pid 30934, hash 7fbd0d4)
 [2026-07-23 16:07:35.722]  listening on :8080
@@ -42,6 +42,7 @@ Read back what happened:
 $ makedog runs                 # list recorded runs
 $ makedog latest               # replay the latest run (possibly live)
 $ makedog latest~1 --plain     # the run before, ANSI stripped
+$ makedog current              # the run of the build on disk, waiting if needed
 $ makedog diff                 # what changed between the last two runs?
 $ makedog search 'ERROR|panic' --since 2d
 ```
@@ -63,6 +64,20 @@ $ makedog signal HUP
 ```
 
 See the manpage for more details.
+
+## Install
+
+```console
+$ brew install jeremywohl/tap/makedog
+```
+
+Or build from source (requires Go):
+
+```console
+$ git clone https://github.com/jeremywohl/makedog && cd makedog && make
+```
+
+The binary lands in `bin/makedog`.
 
 ## Tell your agent about it
 
