@@ -1,6 +1,6 @@
 # makedog
 
-A runner for server binaries: restart on builds, log every run, send signals, run make targets, and more.
+A runner for your server binaries.
 
 - **Restarts on builds** — watches the compiled binary, not your source. Recompiling is your editor's or your agent's job; makedog notices the new build and bounces the process.
 - **Logs every run** — each execution is recorded to a durable store: replay it, tail it, diff two runs, grep the last week.
@@ -73,20 +73,30 @@ Paste this into your `CLAUDE.md` / `AGENTS.md` and your agent can rebuild, confi
 
 The server runs under makedog, which restarts it whenever the binary
 is rebuilt. Every run's output and status are logged and readable in
-real time — never start, stop, or kill the server process yourself.
+real time; never start, stop, or kill the server process yourself.
 
-- After a rebuild, verify the new build came up:
-  `makedog current --until 'listening on' --timeout 30s`
-  (exit 0 = up, 1 = run ended first, 2 = timeout). It gates on the
-  run of the binary now on disk, so call it any time after the build.
-- Read output: `makedog latest --plain` (`-f` streams, `-n 100` and
-  `--since 5m` trim, `--json` emits JSONL records).
-- Inspect a run: `makedog info --json` — one object of metadata:
-  pid, binary hash, git state, start time, exit status, live or not.
+Example invocations:
+
+- Print output so far from the run of the build on disk,
+  waiting for it to start if needed: `makedog current`, often paired
+  with options `--until '<regex to stop reading at>'` (implies --follow),
+  and `--timeout 30s` (exit 0 = matched, 1 = run ended first, 2 = timeout).
+  Run any time after builds, e.g. `make && makedog current <opts>`.
+- Check the current run: `makedog info --json`, showing pid, binary
+  hash, git state, start time, live or exited. This answers "is it
+  up now?"; `current` (with --until) answers "tell me when this
+  build is up."
+- Print the last/live run immediately: `makedog latest`.
+- Other options for current/latest/next: `--follow` streams until end of run,
+  `-n 100` and `--since 5m` trim, `--json` emits JSONL records, `--plain`
+  strips ANSI.
 - Dig through history: `makedog search '<regex>' --since 2d`; compare
   two runs with `makedog diff`.
-- Control the process: `makedog restart | stop | start`,
-  `makedog signal HUP`, `makedog status`.
+- Human-driven, rarely for agents (rebuilds already restart the server):
+  `makedog restart | stop | start | status`. `makedog signal <SIG>`
+  delivers whatever the app wired that signal to — know the handler
+  before sending.
+- See `makedog --help` for more details.
 ```
 
 ## Run logs
