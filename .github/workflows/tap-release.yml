@@ -1,7 +1,7 @@
 # On a published GitHub release, bump the Homebrew formula in
 # jeremywohl/homebrew-tap to the new tag's source tarball.
 #
-# Requires a TAP_PUSH_TOKEN repository secret: a fine-grained PAT with
+# Requires a HOMEBREW_TAP_TOKEN repository secret: a fine-grained PAT with
 # contents read/write on jeremywohl/homebrew-tap.
 
 name: Update Homebrew tap
@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jeremywohl/homebrew-tap
-          token: ${{ secrets.TAP_PUSH_TOKEN }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Bump formula and push
         run: |
