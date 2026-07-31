@@ -30,9 +30,16 @@ jobs:
       - name: Compute tarball checksum
         id: tarball
         run: |
+          set -o pipefail
           TAG="${{ github.event.release.tag_name }}"
           URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
           SHA=$(curl -fsSL "$URL" | sha256sum | cut -d' ' -f1)
+          # Belt and suspenders: reject the well-known hash of empty input,
+          # in case the fetch yields no data without a curl error.
+          if [ "$SHA" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+            echo "tarball fetch produced no data: $URL" >&2
+            exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
