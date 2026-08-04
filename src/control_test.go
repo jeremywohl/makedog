@@ -146,6 +146,91 @@ func TestControlSurvivesStalledTerminal(t *testing.T) {
 	waitForExit(t, cmd, childPidFrom(t, snapshot(), 2))
 }
 
+// TestLoglevelControl drives the loglevel verb end to end: listing, a signal
+// poke, the env restart handshake, and the one-shot reversion on the next
+// restart.
+func TestLoglevelControl(t *testing.T) {
+	script := "#!/bin/sh\n" +
+		"trap 'echo got-usr1' USR1\n" +
+		"trap 'exit 0' TERM\n" +
+		"echo \"level=[$LOG_LEVEL]\"\n" +
+		"echo serving\n" +
+		"while :; do sleep 0.1; done\n"
+	config := "[loglevel]\n" +
+		"env = \"LOG_LEVEL\"\n" +
+		"debug.env = \"app=verbose\"\n" +
+		"noisy.signal = \"USR1\"\n"
+	cmd, snapshot, childPid := makedogSessionWith(t, script, config)
+
+	ctl := func(args ...string) (string, int) {
+		c := exec.Command(makedogBinary(t), args...)
+		c.Dir = cmd.Dir
+		c.Env = append(os.Environ(), "MAKEDOG_STATE_DIR="+filepath.Join(cmd.Dir, "state"))
+		out, _ := c.CombinedOutput()
+		return string(out), c.ProcessState.ExitCode()
+	}
+
+	// The socket comes up with the session; give it a moment.
+	deadline := time.Now().Add(5 * time.Second)
+	var out string
+	var code int
+	for {
+		out, code = ctl("loglevel", "--list")
+		if code == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if code != 0 || !strings.Contains(out, "noisy") || !strings.Contains(out, "LOG_LEVEL=app=verbose") {
+		t.Fatalf("loglevel --list: exit %d, output %q", code, out)
+	}
+	waitForOutput(t, cmd, snapshot, "child readiness", func(s string) bool {
+		return strings.Contains(s, "serving")
+	})
+
+	// A signal level pokes the live run without restarting it.
+	if out, code = ctl("loglevel", "noisy"); code != 0 {
+		t.Fatalf("loglevel noisy: exit %d, output %q", code, out)
+	}
+	waitForOutput(t, cmd, snapshot, "USR1 echo", func(s string) bool {
+		return strings.Contains(s, "got-usr1")
+	})
+
+	// Named levels close the vocabulary: an absent word is an error, not an
+	// env passthrough.
+	if out, code = ctl("loglevel", "trace"); code == 0 || !strings.Contains(out, "unknown level") {
+		t.Fatalf("loglevel trace: exit %d, output %q", code, out)
+	}
+
+	// An env level without --restart is refused; stdin is no terminal here,
+	// so the client must fail fast rather than prompt.
+	if out, code = ctl("loglevel", "debug"); code == 0 || !strings.Contains(out, "--restart") {
+		t.Fatalf("loglevel debug without --restart: exit %d, output %q", code, out)
+	}
+
+	// Acknowledged, a named env level spawns run 2 in its environment, and
+	// the banner says so.
+	if out, code = ctl("loglevel", "debug", "--restart"); code != 0 || !strings.Contains(out, "run 2") {
+		t.Fatalf("loglevel debug --restart: exit %d, output %q", code, out)
+	}
+	waitForOutput(t, cmd, snapshot, "env level applied", func(s string) bool {
+		return strings.Contains(s, "level=[app=verbose]") && strings.Contains(s, "loglevel debug")
+	})
+
+	// The poke is one-shot: the next restart reverts to the baseline
+	// environment (a second empty level echo, after run 1's).
+	if out, code = ctl("restart"); code != 0 {
+		t.Fatalf("restart: exit %d, output %q", code, out)
+	}
+	waitForOutput(t, cmd, snapshot, "baseline reversion", func(s string) bool {
+		return strings.Count(s, "level=[]") >= 2
+	})
+
+	_ = childPid // run 1's child; runs 2 and 3 have come and gone since
+	cmd.Process.Signal(syscall.SIGTERM)
+	waitForExit(t, cmd, childPidFrom(t, snapshot(), 3))
+}
+
 // TestLiveInstancesPrunesStale verifies dead registry entries are removed.
 func TestLiveInstancesPrunesStale(t *testing.T) {
 	s := &binaryStore{dir: t.TempDir()}

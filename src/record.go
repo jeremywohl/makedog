@@ -32,6 +32,7 @@ type record struct {
 	GitBranch string `json:"git_branch,omitempty"`
 	GitCommit string `json:"git_commit,omitempty"`
 	Makedog   string `json:"makedog,omitempty"`
+	Loglevel  string `json:"loglevel,omitempty"` // env loglevel poke this run started under
 
 	// exit
 	ExitCode *int   `json:"exit_code,omitempty"`

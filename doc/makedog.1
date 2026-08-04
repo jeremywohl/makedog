@@ -26,6 +26,10 @@ run, send signals, run make targets, and more
 .B makedog
 .B signal
 \fIname\fR [\fIOPTIONS\fR]
+.br
+.B makedog
+.B loglevel
+[\fIlevel\fR] [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B makedog
 supervises a server binary during development. It starts the binary,
@@ -145,6 +149,20 @@ Command a live instance's binary remotely.
 .TP
 .BI signal " name"
 Send the supervised binary a signal remotely, e.g. HUP or USR1.
+.TP
+.BI loglevel " level"
+Set the supervised binary's log level, by whatever transport the
+project's
+.B [loglevel]
+configuration declares. With no \fIlevel\fR, or with
+.BR \-\-list ,
+list the configured levels instead. Every application is ephemeral: an
+env level spawns one run at that level and requires a restart
+acknowledgment (a prompt, or
+.BR \-\-restart ),
+a signal or command level pokes the live run, and the next restart
+reverts to baseline either way. Permanent levels belong in the
+project's own configuration.
 .SH OPTIONS
 .SS Watch options
 .TP
@@ -183,11 +201,21 @@ Only runs active within this age, like 2d or 6h.
 .TP
 .B \-\-all\-binaries
 Search every binary recorded for the project.
-.SS Control options (status, restart, stop, start, signal)
+.SS Control options (status, restart, stop, start, signal, loglevel)
 .TP
 .BI \-\-instance " pid"
 Target this makedog pid, when several are live. Mutating verbs require
 it whenever more than one instance is running.
+.TP
+.B \-\-restart
+Permit the restart an env-applied
+.B loglevel
+requires.
+.TP
+.B \-\-list
+List the levels the
+.B [loglevel]
+configuration defines, or the generic setting.
 .SS Shared options (all but watch)
 .TP
 .BR \-\-json ", " \-\-jsonl
@@ -215,6 +243,16 @@ Show key help.
 .TP
 .B k
 Write a mark into the run log.
+.TP
+.B l
+Choose a named log level from a menu and apply it (see
+.B [loglevel]
+under
+.B CONFIGURATION
+below). An env level restarts into the level without further ado, we
+assume
+.BR \-\-restart
+consent.
 .TP
 .B m
 Run make.
@@ -255,6 +293,45 @@ signal = "USR1"
 name   = "rotate logs"   # optional display name
 .fi
 .RE
+.SS [loglevel]
+Describes how the
+.B loglevel
+verb works, given a level argument. Makedog defines no levels of
+its own. You can either use one of the bare words
+.B env
+(a variable name) or
+.B command
+(a shell command with %s), and these will pass your provided level as-is, without checks:
+.PP
+.RS
+.nf
+[loglevel]
+env          = "DEBUG"          # restart with env DEBUG=<level>
+                                #   --or--
+command      = "curl ..%s.."    # run command, replacing %s with <level>
+.fi
+.RE
+.PP
+Or you can define all the valid levels, each with the same mechanism, or mix in different ones.
+.PP
+.RS
+.nf
+[loglevel]
+env          = "DEBUG"
+debug.env    = "app:*,http:*"   # restart with env DEBUG=app:*,http:*
+info.env     = "app:*"          # restart with env DEBUG=app:*
+up.signal    = "USR1"           # send the process USR1
+mute.command = "curl -sX PUT localhost:8080/log/level -d off" # no %s
+.fi
+.RE
+.PP
+Each named entry sets exactly one of
+.BR env ", " signal ", or " command .
+An env level restarts the binary with the assignment in its
+environment, for that run alone; a signal or command level acts on the
+live process without restarting it. Note that the prior bare
+.B env
+now defines the environment variable name for each value.
 .SS [logs]
 Tunes run log retention. A watch-mode makedog runs one maintenance pass
 shortly after startup, compressing idle runs with zstd and pruning by
@@ -352,6 +429,16 @@ Tell the running server to reload its config, from another terminal:
 .RS
 .nf
 makedog signal HUP
+.fi
+.RE
+.PP
+Bounce the server into debug logging for one run, then see what the
+extra verbosity caught:
+.PP
+.RS
+.nf
+makedog loglevel debug \-\-restart
+makedog diff
 .fi
 .RE
 .SH SEE ALSO

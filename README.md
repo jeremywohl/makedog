@@ -7,7 +7,7 @@ A runner for your server binaries.
 - **Live everywhere** — other shells and agents watch in real time: `tail` follows output across restarts, `current` gates on the run of the build on disk, `next` catches the coming run from its first line, `--follow` streams one in flight.
 - **Sends signals** — from an interactive menu, or remotely from another terminal.
 - **Runs make targets** — pick a Makefile target from within the watch session.
-- **Remote control** — every instance listens on a unix socket: `status`, `restart`, `stop`, `start`, `signal` from anywhere in the project.
+- **Remote control** — every instance listens on a unix socket: `status`, `restart`, `stop`, `start`, `signal`, `loglevel` from another terminal.
 - **Agent-friendly** — `--json` output, and readiness gates like `current --until 'listening' --timeout 30s` with meaningful exit codes.
 
 ## Examples
@@ -16,7 +16,7 @@ Supervise a server; rebuilds restart it automatically:
 
 ```console
 $ makedog bin/server
-keys: 'c' to clear screen, 'h' for this help, 'k' to mark log, 'm' to run make, 'q' to quit, 's' to send signal, 't' to run make targets, 'x' to start/stop
+keys: 'c' to clear screen, 'h' for this help, 'k' to mark log, 'l' to set log level, 'm' to run make, 'q' to quit, 's' to send signal, 't' to run make targets, 'x' to start/stop
 
 --> start 1 bin/server (pid 30934, hash 7fbd0d4)
 [2026-07-23 16:07:35.722]  listening on :8080
@@ -34,7 +34,7 @@ keys: 'c' to clear screen, 'h' for this help, 'k' to mark log, 'm' to run make, 
 [2026-07-23 16:12:40.146]  listening on :8080
 ```
 
-While it runs, single keys drive it: `r` restart, `x` stop/start, `s` signal menu, `t` make-target menu, `k` mark the log, `q` quit.
+While it runs, single keys drive it: `r` restart, `x` stop/start, `s` signal menu, `t` make-target menu, `l` log level menu, `k` mark the log, `q` quit.
 
 Read back what happened:
 
@@ -107,6 +107,9 @@ Example invocations:
   strips ANSI.
 - Dig through history: `makedog search '<regex>' --since 2d`; compare
   two runs with `makedog diff`.
+- If the project defines log levels (`makedog loglevel --list`), raise
+  verbosity for one run with `makedog loglevel debug --restart`; it
+  reverts on the next restart.
 - Human-driven, rarely for agents (rebuilds already restart the server):
   `makedog restart | stop | start | status`. `makedog signal <SIG>`
   delivers whatever the app wired that signal to — know the handler
@@ -152,9 +155,32 @@ name   = "rotate logs"
 
 Configured signals replace the default menu — your project's menu shows exactly these. The remote verb is unconstrained: `makedog signal USR2` sends anything makedog knows.
 
+## Log levels
+
+`l` opens a level menu in the watch session; `makedog loglevel <level>` does the same from any terminal (`--list` shows what's defined). Makedog defines no levels itself, config maps each word to an action:
+
+```toml
+[loglevel]
+env          = "DEBUG"
+debug.env    = "app:*,http:*"   # restart with DEBUG=app:*,http:*
+info.env     = "app:*"          # restart with DEBUG=app:*
+up.signal    = "USR1"           # send the process USR1
+mute.command = "curl -sX PUT localhost:8080/log/level -d off"
+```
+
+This defines all the valid levels, and you can mix mechanisms: *env*, *signal*, or *command*.
+
+An *env* entry restarts the binary with the assignment in its environment. (The verb asks to restart first, or `--restart` skips.)
+
+*signal* and *command* entries act on the live run.
+
+Alternatively, a bare `env = "LOG_LEVEL"`, or `command = "curl ..%s.."`, with no named levels passes any word straight through: `makedog loglevel trace` becomes `LOG_LEVEL=trace`. Whereas naming levels closes the vocabulary; unknown words then error.
+
+Note: level changes are temporary, the next run reverts to baseline.
+
 ## Remote control
 
-Each watching instance registers on a unix socket, so from any terminal in the project:
+Each watching instance registers on a unix socket, so from another terminal in the project directory:
 
 ```console
 $ makedog status               # who's live?
@@ -162,9 +188,10 @@ $ makedog stop                 # park the binary (makedog keeps watching)
 $ makedog start
 $ makedog restart
 $ makedog signal TERM
+$ makedog loglevel debug --restart
 ```
 
-With several instances live, mutating verbs ask for `--instance <pid>` rather than guessing.
+With several instances live, mutating verbs ask for `--instance <pid>` rather than guessing. From any other directory, `-C <dir>` points the verb at the project.
 
 ## Configuration
 
@@ -174,6 +201,11 @@ makedog loads `.makedog.toml` from the project directory (or `--config path`). M
 [[signals]]                # scope and name the signal menu
 signal = "HUP"
 name   = "reload config"
+
+[loglevel]                 # dynamic log levels (see Log levels above)
+env       = "DEBUG"
+debug.env = "app:*,http:*"
+up.signal = "USR1"
 
 [logs]                     # retention; zero disables a rule
 compress_after = "24h"     # default

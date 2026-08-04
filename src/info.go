@@ -77,6 +77,7 @@ type runCard struct {
 	Hash       string    `json:"hash,omitempty"`
 	GitBranch  string    `json:"git_branch,omitempty"`
 	GitCommit  string    `json:"git_commit,omitempty"`
+	Loglevel   string    `json:"loglevel,omitempty"`
 	Makedog    string    `json:"makedog,omitempty"`
 	LogPath    string    `json:"log_path"`
 	LogSize    int64     `json:"log_size"`
@@ -165,6 +166,7 @@ func buildRunCard(store *binaryStore, number int) (runCard, error) {
 		card.Pid = meta.Pid
 		card.Hash = meta.Hash
 		card.GitBranch, card.GitCommit = meta.GitBranch, meta.GitCommit
+		card.Loglevel = meta.Loglevel
 		card.Makedog = meta.Makedog
 	}
 
@@ -225,6 +227,9 @@ func renderRunCard(c runCard) {
 	}
 	if git := gitLabel(c.GitBranch, c.GitCommit); git != "" {
 		row("git", "%s", git)
+	}
+	if c.Loglevel != "" {
+		row("loglevel", "%s", c.Loglevel)
 	}
 	if c.Makedog != "" {
 		row("makedog", "%s", c.Makedog)

@@ -23,6 +23,7 @@ func init() {
 		'c': {(*Makedog).keypressClear, "to clear screen", false},
 		'h': {(*Makedog).keypressHelp, "for this help", false},
 		'k': {(*Makedog).keypressMark, "to mark log", false},
+		'l': {(*Makedog).keypressLoglevel, "to set log level", false},
 		'm': {(*Makedog).keypressMake, "to run make", false},
 		'q': {(*Makedog).keypressQuit, "to quit", false},
 		'r': {(*Makedog).keypressRestart, "to restart", true},
@@ -105,6 +106,11 @@ func (w *Makedog) keypressRestart() step {
 // keypressSignal enters signal selection mode.
 func (w *Makedog) keypressSignal() step {
 	return w.handleSignalMenu()
+}
+
+// keypressLoglevel enters log level selection mode.
+func (w *Makedog) keypressLoglevel() step {
+	return w.handleLoglevelMenu()
 }
 
 // keypressMakeTargets enters make target selection mode.

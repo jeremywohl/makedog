@@ -840,11 +840,23 @@ func makedogBinary(t *testing.T) string {
 // far, and the child pid parsed from the start message.
 func makedogSession(t *testing.T, script string) (*exec.Cmd, func() string, int) {
 	t.Helper()
+	return makedogSessionWith(t, script, "")
+}
+
+// makedogSessionWith additionally seeds the session directory with a
+// .makedog.toml, when config is non-empty.
+func makedogSessionWith(t *testing.T, script, config string) (*exec.Cmd, func() string, int) {
+	t.Helper()
 
 	dir := t.TempDir()
 	child := filepath.Join(dir, "child")
 	if err := os.WriteFile(child, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if config != "" {
+		if err := os.WriteFile(filepath.Join(dir, ".makedog.toml"), []byte(config), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	cmd := exec.Command(makedogBinary(t), child)

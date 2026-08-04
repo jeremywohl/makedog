@@ -27,6 +27,11 @@ type LogsConfig struct {
 type Config struct {
 	Signals []SignalConfig `toml:"signals"`
 	Logs    *LogsConfig    `toml:"logs"`
+
+	// The [loglevel] table mixes reserved keys with arbitrary level names, so
+	// it lands raw here and parseLoglevel gives it shape.
+	LoglevelTable map[string]toml.Primitive `toml:"loglevel"`
+	Loglevel      *LoglevelConfig           `toml:"-"`
 }
 
 // loadConfig attempts to load config from the specified path, or .makedog.toml from
@@ -48,10 +53,19 @@ func loadConfig(configPath string) *Config {
 	}
 
 	// Parse the TOML file
-	if _, err := toml.DecodeFile(path, config); err != nil {
+	md, err := toml.DecodeFile(path, config)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "makedog: ignoring config %s: %v\n", path, err)
 		return &Config{}
 	}
+
+	// A bad [loglevel] disables that feature alone, not the whole config.
+	if lc, err := parseLoglevel(md, config.LoglevelTable); err != nil {
+		fmt.Fprintf(os.Stderr, "makedog: ignoring [loglevel] config: %v\n", err)
+	} else {
+		config.Loglevel = lc
+	}
+	config.LoglevelTable = nil
 
 	return config
 }

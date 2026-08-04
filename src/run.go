@@ -31,9 +31,14 @@ type run struct {
 }
 
 // startRun launches the binary under a pty and begins relaying its output,
-// recording into logFile (which may be nil) via the sink.
-func startRun(binaryPath string, number int, logFile *os.File) (*run, error) {
+// recording into logFile (which may be nil) via the sink. extraEnv, when
+// present, overlays the inherited environment for this run alone (an env
+// loglevel poke), with loglevel naming it for the banner and meta record.
+func startRun(binaryPath string, number int, logFile *os.File, extraEnv []string, loglevel string) (*run, error) {
 	cmd := exec.Command(binaryPath)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 
 	// Start with pty for real-time output
 	ptmx, err := pty.Start(cmd)
@@ -62,7 +67,7 @@ func startRun(binaryPath string, number int, logFile *os.File) (*run, error) {
 		r.log.write(record{
 			T: recMeta, TS: r.startTime, Run: number, Binary: binaryPath, Cwd: cwd,
 			Pid: cmd.Process.Pid, Hash: binaryHash, GitBranch: gitBranch, GitCommit: gitCommit,
-			Makedog: version,
+			Makedog: version, Loglevel: loglevel,
 		})
 		out.attach(r.log)
 	}
@@ -74,6 +79,9 @@ func startRun(binaryPath string, number int, logFile *os.File) (*run, error) {
 	}
 	if git := gitLabel(gitBranch, gitCommit); git != "" {
 		msg += fmt.Sprintf(", git %s", git)
+	}
+	if loglevel != "" {
+		msg += fmt.Sprintf(", loglevel %s", loglevel)
 	}
 	msg += ")"
 

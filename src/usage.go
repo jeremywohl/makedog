@@ -37,6 +37,7 @@ func usage() {
 	printOption("status", "List live makedog instances for the project")
 	printOption("restart, stop, start", "Command a live instance's binary remotely")
 	printOption("signal <name>", "Send the binary a signal remotely, e.g. HUP or USR1")
+	printOption("loglevel [level]", "Set the binary's log level per config; bare or --list shows levels")
 	printStderr("\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Watch options:"))
@@ -63,6 +64,7 @@ func usage() {
 
 	printStderr("%s\n", boldUnderStyle.Render("Control options:"))
 	printOption("--instance <pid>", "Target this makedog pid, when several are live")
+	printOption("--restart", "Permit the restart an env-applied loglevel requires")
 	printStderr("\n")
 
 	printStderr("%s\n", boldUnderStyle.Render("Shared options (all but watch):"))

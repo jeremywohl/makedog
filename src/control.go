@@ -23,9 +23,11 @@ import (
 
 // ctrlRequest is one command to a live instance.
 type ctrlRequest struct {
-	Cmd    string `json:"cmd"`              // status | restart | stop | start | signal
-	Signal string `json:"signal,omitempty"` // for cmd signal, e.g. "HUP"
-	reply  chan ctrlResponse
+	Cmd     string `json:"cmd"`               // status | restart | stop | start | signal | loglevel | loglevel-list
+	Signal  string `json:"signal,omitempty"`  // for cmd signal, e.g. "HUP"
+	Level   string `json:"level,omitempty"`   // for cmd loglevel
+	Restart bool   `json:"restart,omitempty"` // loglevel: the caller accepts an env level's restart
+	reply   chan ctrlResponse
 }
 
 // ctrlResponse reports an instance's state after the command.
@@ -38,6 +40,9 @@ type ctrlResponse struct {
 	Running  bool      `json:"running"`
 	ChildPid int       `json:"child_pid,omitempty"`
 	Started  time.Time `json:"started,omitzero"` // current run's start
+
+	NeedsRestart bool           `json:"needs_restart,omitempty"` // loglevel: refused pending a restart ack
+	Levels       []levelListing `json:"levels,omitempty"`        // loglevel-list
 }
 
 // instanceInfo is one live watch instance's registry record.
@@ -136,6 +141,10 @@ func (w *Makedog) handleControl(req *ctrlRequest) step {
 	switch req.Cmd {
 	case "status":
 		req.reply <- w.controlStatus()
+	case "loglevel":
+		return w.handleLoglevel(req)
+	case "loglevel-list":
+		req.reply <- w.loglevelListing()
 	case "signal":
 		sig, ok := parseSignalName(strings.TrimPrefix(req.Signal, "SIG"))
 		switch {
@@ -253,10 +262,8 @@ func controlCall(socket string, req ctrlRequest) (ctrlResponse, error) {
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(25 * time.Second))
 
-	if err := json.NewEncoder(conn).Encode(struct {
-		Cmd    string `json:"cmd"`
-		Signal string `json:"signal,omitempty"`
-	}{req.Cmd, req.Signal}); err != nil {
+	// The unexported reply channel is invisible to the encoder.
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return ctrlResponse{}, err
 	}
 	var resp ctrlResponse
@@ -335,8 +342,37 @@ func statusMain(args []string) {
 	tw.Flush()
 }
 
+// pickInstance resolves control targeting to exactly one live instance;
+// ambiguity is an error, never a guess.
+func pickInstance(dir, binary string, pid int, verb string) instanceInfo {
+	instances, err := findInstances(dir, binary)
+	if err != nil {
+		fatal("%v", err)
+	}
+	if pid != 0 {
+		kept := instances[:0]
+		for _, inst := range instances {
+			if inst.Pid == pid {
+				kept = append(kept, inst)
+			}
+		}
+		instances = kept
+	}
+	switch {
+	case len(instances) == 0:
+		fatal("no live makedog instance to %s", verb)
+	case len(instances) > 1:
+		var names []string
+		for _, inst := range instances {
+			names = append(names, fmt.Sprintf("%d (%s)", inst.Pid, inst.Binary))
+		}
+		fatal("several live instances: %s; target one with --instance <pid>", strings.Join(names, ", "))
+	}
+	return instances[0]
+}
+
 // controlMain implements the mutating verbs restart, stop, and start, plus
-// signal (with its name in req.Signal). Ambiguity is an error, never a guess.
+// signal (with its name in req.Signal).
 func controlMain(req ctrlRequest, args []string) {
 	fs := newVerbFlags(req.Cmd)
 	jsonOut := fs.Bool("json", false, "emit the instance's response as JSON")
@@ -345,31 +381,8 @@ func controlMain(req ctrlRequest, args []string) {
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, args)
 
-	instances, err := findInstances(*dir, *binary)
-	if err != nil {
-		fatal("%v", err)
-	}
-	if *instance != 0 {
-		kept := instances[:0]
-		for _, inst := range instances {
-			if inst.Pid == *instance {
-				kept = append(kept, inst)
-			}
-		}
-		instances = kept
-	}
-	switch {
-	case len(instances) == 0:
-		fatal("no live makedog instance to %s", req.Cmd)
-	case len(instances) > 1:
-		var names []string
-		for _, inst := range instances {
-			names = append(names, fmt.Sprintf("%d (%s)", inst.Pid, inst.Binary))
-		}
-		fatal("several live instances: %s; target one with --instance <pid>", strings.Join(names, ", "))
-	}
-
-	resp, err := controlCall(instances[0].Socket, req)
+	inst := pickInstance(*dir, *binary, *instance, req.Cmd)
+	resp, err := controlCall(inst.Socket, req)
 	if err != nil {
 		fatal("%s: %v", req.Cmd, err)
 	}

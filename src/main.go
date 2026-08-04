@@ -60,6 +60,8 @@ func main() {
 		controlMain(ctrlRequest{Cmd: first}, args[1:])
 	case first == "signal":
 		signalMain(args[1:])
+	case first == "loglevel":
+		loglevelMain(args[1:])
 	case isRunRef(first):
 		showMain(first, args[1:])
 	case strings.HasPrefix(first, "-") || strings.ContainsRune(first, '/'):
@@ -127,6 +129,8 @@ type Makedog struct {
 	extSignal    chan os.Signal
 	restartTimes []time.Time
 	config       *Config
+	nextRunEnv   []string // one-shot env overlay for the next start (an env loglevel poke)
+	nextRunLevel string   // its level word, for the banner and meta record
 }
 
 // NewMakedog creates a new Makedog instance for the given binary path.
@@ -203,7 +207,9 @@ func (w *Makedog) startBinary() error {
 		}
 	}
 
-	r, err := startRun(w.binaryPath, number, logFile)
+	env, level := w.nextRunEnv, w.nextRunLevel
+	w.nextRunEnv, w.nextRunLevel = nil, ""
+	r, err := startRun(w.binaryPath, number, logFile, env, level)
 	if err != nil {
 		if logFile != nil {
 			logFile.Close()
