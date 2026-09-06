@@ -338,7 +338,7 @@ func (w *Makedog) handleLoglevel(req *ctrlRequest) step {
 		}
 		w.clearSpinTracking()
 		w.nextRunEnv, w.nextRunLevel = []string{p.env}, p.level
-		w.ctrlPending = req.reply
+		w.ctrlPending = req
 		if w.processRunning() {
 			return step{stopBinary: true, startBinary: true, stopReason: "loglevel " + p.level + " requested"}
 		}

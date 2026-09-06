@@ -56,7 +56,7 @@ func main() {
 		diffMain(args[1:])
 	case first == "status":
 		statusMain(args[1:])
-	case first == "restart" || first == "stop" || first == "start":
+	case first == "restart" || first == "stop" || first == "start" || first == "quit":
 		controlMain(ctrlRequest{Cmd: first}, args[1:])
 	case first == "signal":
 		signalMain(args[1:])
@@ -121,7 +121,7 @@ type Makedog struct {
 	store        *binaryStore // durable run archive, nil when unavailable
 	retention    retentionPolicy
 	ctrlChan     chan *ctrlRequest // remote commands into the monitor loop; nil disables
-	ctrlPending  chan ctrlResponse // parked reply for an in-flight state change
+	ctrlPending  *ctrlRequest      // parked state-changing request awaiting its reply
 	ctrlListener net.Listener      // this instance's control socket
 	ctrlSocket   string
 	lastMtime    int64
@@ -169,11 +169,20 @@ func (w *Makedog) Run() error {
 	return w.monitor()
 }
 
-// exitCleanly waits for output to complete, performs cleanup, and exits the program.
+// exitCleanly waits for output to complete, performs cleanup, and exits the
+// program. A remote quit's reply must reach the wire before os.Exit kills
+// its writer, so the caller sees the final state rather than EOF; the wait
+// is bounded so a stalled peer can't hold the exit.
 func (w *Makedog) exitCleanly(status int) {
 	if w.run != nil {
 		w.run.drainOutput()
 		w.run.finishLog()
+	}
+	if req := w.flushControlReply(); req != nil {
+		select {
+		case <-req.sent:
+		case <-time.After(2 * time.Second):
+		}
 	}
 	w.stopControl()
 	flushTerm()

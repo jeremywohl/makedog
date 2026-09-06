@@ -2,7 +2,7 @@
 // instance listens on a unix socket (in a short tmpdir path — sun_path caps
 // at ~104 bytes, which the store's deep directories exceed) and registers
 // itself in its lineage's instances directory. The status, restart, stop,
-// start, and signal verbs discover instances there, prune the stale, and
+// start, quit, and signal verbs discover instances there, prune the stale, and
 // speak one JSON request/response per connection. Requests are serviced by
 // the monitor loop itself, so remote commands obey exactly the keypress
 // paths' state discipline; mutating verbs demand --instance when several
@@ -23,11 +23,12 @@ import (
 
 // ctrlRequest is one command to a live instance.
 type ctrlRequest struct {
-	Cmd     string `json:"cmd"`               // status | restart | stop | start | signal | loglevel | loglevel-list
+	Cmd     string `json:"cmd"`               // status | restart | stop | start | quit | signal | loglevel | loglevel-list
 	Signal  string `json:"signal,omitempty"`  // for cmd signal, e.g. "HUP"
 	Level   string `json:"level,omitempty"`   // for cmd loglevel
 	Restart bool   `json:"restart,omitempty"` // loglevel: the caller accepts an env level's restart
 	reply   chan ctrlResponse
+	sent    chan struct{} // closed once the reply is on the wire
 }
 
 // ctrlResponse reports an instance's state after the command.
@@ -113,6 +114,8 @@ func (w *Makedog) serveControl(conn net.Conn) {
 		return
 	}
 	req.reply = make(chan ctrlResponse, 1)
+	req.sent = make(chan struct{})
+	defer close(req.sent)
 
 	select {
 	case w.ctrlChan <- &req:
@@ -134,7 +137,7 @@ func (w *Makedog) serveControl(conn net.Conn) {
 func (w *Makedog) handleControl(req *ctrlRequest) step {
 	running := w.processRunning()
 	defer_ := func(s step) step {
-		w.ctrlPending = req.reply
+		w.ctrlPending = req
 		return s
 	}
 
@@ -162,6 +165,8 @@ func (w *Makedog) handleControl(req *ctrlRequest) step {
 			break
 		}
 		return defer_(step{stopBinary: true, stopReason: "remote stop requested"})
+	case "quit":
+		return defer_(step{stopBinary: true, exitAfter: true, stopReason: "remote quit requested"})
 	case "start":
 		if running {
 			req.reply <- w.controlStatus()
@@ -181,12 +186,15 @@ func (w *Makedog) handleControl(req *ctrlRequest) step {
 }
 
 // flushControlReply completes a parked state-changing request with the
-// post-step state.
-func (w *Makedog) flushControlReply() {
-	if w.ctrlPending != nil {
-		w.ctrlPending <- w.controlStatus()
+// post-step state, returning the request so an exiting caller can await its
+// delivery.
+func (w *Makedog) flushControlReply() *ctrlRequest {
+	req := w.ctrlPending
+	if req != nil {
+		req.reply <- w.controlStatus()
 		w.ctrlPending = nil
 	}
+	return req
 }
 
 // controlStatus snapshots the instance for a response.
@@ -371,8 +379,8 @@ func pickInstance(dir, binary string, pid int, verb string) instanceInfo {
 	return instances[0]
 }
 
-// controlMain implements the mutating verbs restart, stop, and start, plus
-// signal (with its name in req.Signal).
+// controlMain implements the mutating verbs restart, stop, start, and quit,
+// plus signal (with its name in req.Signal).
 func controlMain(req ctrlRequest, args []string) {
 	fs := newVerbFlags(req.Cmd)
 	jsonOut := fs.Bool("json", false, "emit the instance's response as JSON")
@@ -395,6 +403,8 @@ func controlMain(req ctrlRequest, args []string) {
 	switch {
 	case req.Cmd == "signal":
 		fmt.Printf("sent %s to run %d (child pid %d)\n", req.Signal, resp.Run, resp.ChildPid)
+	case req.Cmd == "quit":
+		fmt.Printf("makedog %d quit (last run %d)\n", resp.Pid, resp.Run)
 	case resp.Running:
 		fmt.Printf("run %d running (child pid %d)\n", resp.Run, resp.ChildPid)
 	default:

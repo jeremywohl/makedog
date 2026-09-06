@@ -1,5 +1,5 @@
 // Test suite for live control: a real watch session commanded remotely —
-// status, restart, signal, stop, start — plus registry hygiene on exit.
+// status, restart, signal, stop, start, quit — plus registry hygiene on exit.
 package main
 
 import (
@@ -82,9 +82,10 @@ func TestLiveControl(t *testing.T) {
 		t.Fatalf("start: exit %d, output %q", code, out)
 	}
 
-	// Clean exit deregisters: status finds nothing afterward.
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
+	// quit stops the binary and the instance, replying before the socket
+	// goes; the clean exit deregisters, so status finds nothing afterward.
+	if out, code = ctl("quit"); code != 0 || !strings.Contains(out, "quit (last run 3)") {
+		t.Fatalf("quit: exit %d, output %q", code, out)
 	}
 	waitForExit(t, cmd, childPidFrom(t, snapshot(), 3))
 

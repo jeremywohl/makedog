@@ -7,7 +7,7 @@ A runner for your server binaries.
 - **Live everywhere** — other shells and agents watch in real time: `tail` follows output across restarts, `current` gates on the run of the build on disk, `next` catches the coming run from its first line, `--follow` streams one in flight.
 - **Sends signals** — from an interactive menu, or remotely from another terminal.
 - **Runs make targets** — pick a Makefile target from within the watch session.
-- **Remote control** — every instance listens on a unix socket: `status`, `restart`, `stop`, `start`, `signal`, `loglevel` from another terminal.
+- **Remote control** — every instance listens on a unix socket: `status`, `restart`, `stop`, `start`, `quit`, `signal`, `loglevel` from another terminal.
 - **Agent-friendly** — `--json` output, and readiness gates like `current --until 'listening' --timeout 30s` with meaningful exit codes.
 
 ## Examples
@@ -189,6 +189,7 @@ $ makedog start
 $ makedog restart
 $ makedog signal TERM
 $ makedog loglevel debug --restart
+$ makedog quit                 # stop the binary and exit makedog itself
 ```
 
 With several instances live, mutating verbs ask for `--instance <pid>` rather than guessing. From any other directory, `-C <dir>` points the verb at the project.

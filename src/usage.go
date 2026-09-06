@@ -36,6 +36,7 @@ func usage() {
 	printOption("diff [a [b]]", "Unified diff of two runs' output, default latest~1 vs latest")
 	printOption("status", "List live makedog instances for the project")
 	printOption("restart, stop, start", "Command a live instance's binary remotely")
+	printOption("quit", "Stop the binary and exit the live instance remotely")
 	printOption("signal <name>", "Send the binary a signal remotely, e.g. HUP or USR1")
 	printOption("loglevel [level]", "Set the binary's log level per config; bare or --list shows levels")
 	printStderr("\n")
