@@ -42,6 +42,7 @@ func usage() {
 	printOption("search <regex>", "Grep recorded runs (alias: grep)")
 	printOption("info [ref]", "One run's metadata card")
 	printOption("diff [a [b]]", "Unified diff of two runs' output")
+	printOption("crash", "The runs behind a spin stop, back to back (alias: spin)")
 	printOption("path [ref]", "A run log's file path")
 	printStderr("\n")
 
@@ -225,6 +226,25 @@ var verbDocs = map[string]verbDoc{
 			{"makedog diff", ""},
 			{"makedog diff 40 42", ""},
 			{"makedog diff --plain | less", ""},
+		},
+	},
+	"crash": {
+		summary: "The runs that tripped the spin stop, back to back (alias: spin)",
+		usage:   []string{"crash [OPTIONS]", "spin [OPTIONS]"},
+		body: fmt.Sprintf("Watch pauses instead of restarting once the binary exits on its own "+
+			"%d times within %s. crash replays that rule over the recorded runs and prints "+
+			"the ones that tripped it, oldest first, each under a header that leads with "+
+			"its exit status. A live newest run is skipped, so it still answers after the "+
+			"restart. With no spin in recent history it prints the last %d runs and says so.",
+			spinMinExits, spinWindow, spinMinExits),
+		exits: []string{
+			"0  a spin was found",
+			"1  no spin; the last runs were shown instead",
+		},
+		examples: []example{
+			{"makedog crash", ""},
+			{"makedog crash -n 20 --plain", "the tail of each run, unstyled"},
+			{"makedog crash --json | jq -c 'select(.t==\"exit\")'", "just the trailers"},
 		},
 	},
 	"status": {

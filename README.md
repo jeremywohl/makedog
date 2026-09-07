@@ -44,6 +44,7 @@ $ makedog latest               # replay the latest run (possibly live)
 $ makedog latest~1 --plain     # the run before, ANSI stripped
 $ makedog current              # the run of the build on disk, waiting if needed
 $ makedog diff                 # what changed between the last two runs?
+$ makedog crash                # the runs behind a spin stop, back to back
 $ makedog search 'ERROR|panic' --since 2d
 ```
 
@@ -107,6 +108,8 @@ Example invocations:
   strips ANSI.
 - Dig through history: `makedog search '<regex>' --since 2d`; compare
   two runs with `makedog diff`.
+- After a crash loop (makedog pauses once the binary exits repeatedly on
+  start): `makedog crash` prints those runs back to back, exit first.
 - If the project defines log levels (`makedog loglevel --list`), raise
   verbosity for one run with `makedog loglevel debug --restart`; it
   reverts on the next restart.
@@ -134,6 +137,7 @@ Read them with:
 | `search <regex>` | grep recorded runs; `--runs 30..34`, `--since 6h`, `--all-binaries` |
 | `info [ref]` | one run's metadata card |
 | `diff [a [b]]` | unified diff of two runs' output |
+| `crash` | the runs that tripped the spin stop, back to back; exit 1 when none did |
 | `path [ref]` | the log's file path |
 
 All readers take `--json` for raw records, `--plain` to strip ANSI, `--binary` to pick among a project's binaries, and `-C dir` to reach another project.

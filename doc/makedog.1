@@ -27,6 +27,10 @@ run, send signals, run make targets, and more
 [\fIa\fR [\fIb\fR]] [\fIOPTIONS\fR]
 .br
 .B makedog
+.BR crash | spin
+[\fIOPTIONS\fR]
+.br
+.B makedog
 .BR status | restart | stop | start | quit
 [\fIOPTIONS\fR]
 .br
@@ -152,6 +156,11 @@ Print a run log's file path; with no ref, the lineage directory.
 .BR diff " [\fIa\fR [\fIb\fR]]"
 Unified diff of two runs' output, default latest~1 vs latest.
 .TP
+.B crash
+The runs that tripped the spin stop, back to back, oldest first, each
+under a header led by its exit status (alias: spin). Exit 1 when no spin
+was found and the last runs were shown instead.
+.TP
 .B status
 List live makedog instances for the project.
 .TP
@@ -265,6 +274,13 @@ Also
 .BR \-\-binary ", " \-C .
 .SS diff
 .BR \-\-plain ", " \-\-binary ", " \-C .
+.SS crash
+.TP
+.BI \-n " count"
+Only the last N records of each run.
+.PP
+Also
+.BR \-\-json ", " \-\-plain ", " \-\-binary ", " \-C .
 .SS status
 .BR \-\-json ", " \-\-binary ", " \-C .
 .SS restart, stop, start, quit, signal

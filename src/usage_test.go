@@ -9,7 +9,7 @@ import (
 // verbs is every verb dispatch routes to a flag set, as the flag set names it.
 var verbs = []string{
 	"watch", "show", "runs", "current", "next", "tail", "search", "info",
-	"path", "diff", "status", "restart", "stop", "start", "quit", "signal",
+	"path", "diff", "crash", "status", "restart", "stop", "start", "quit", "signal",
 	"loglevel",
 }
 

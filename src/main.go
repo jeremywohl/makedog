@@ -64,6 +64,8 @@ func dispatch(args []string) {
 		infoMain(args[1:])
 	case first == "diff":
 		diffMain(args[1:])
+	case first == "crash" || first == "spin":
+		crashMain(args[1:])
 	case first == "status":
 		statusMain(args[1:])
 	case first == "restart" || first == "stop" || first == "start" || first == "quit":
@@ -428,13 +430,24 @@ func (w *Makedog) checkFileModification() step {
 	return step{}
 }
 
+// Spin detection. A child that exits on its own spinMinExits times within
+// spinWindow is paused rather than restarted; a run that lasts spinSettled
+// counts as healthy and clears the tally. The crash verb replays the same
+// rule over recorded runs, so the constants live here alone.
+const (
+	spinWindow   = 5 * time.Second
+	spinMinExits = 3
+	spinSettled  = 10 * time.Second
+	spinMemory   = 5 // exit times remembered
+)
+
 // checkForSpin detects if the process is spinning (exits rapidly after start).
-// Records the current restart time and returns true if ≥3 restarts occurred within 5 seconds.
-// Clears spin tracking if process ran successfully (≥10 seconds).
+// Records the current exit time and returns true if spinMinExits exits occurred
+// within spinWindow. Clears spin tracking if the process ran for spinSettled.
 func (w *Makedog) checkForSpin() bool {
 	// Check if process ran long enough to be considered successful
 	runDuration := time.Since(w.run.startTime)
-	if runDuration >= 10*time.Second {
+	if runDuration >= spinSettled {
 		w.clearSpinTracking()
 		return false
 	}
@@ -442,18 +455,18 @@ func (w *Makedog) checkForSpin() bool {
 	now := time.Now()
 	w.restartTimes = append(w.restartTimes, now)
 
-	// Keep only last 5 restart times
-	if len(w.restartTimes) > 5 {
-		w.restartTimes = w.restartTimes[len(w.restartTimes)-5:]
+	// Keep only the last spinMemory exit times
+	if len(w.restartTimes) > spinMemory {
+		w.restartTimes = w.restartTimes[len(w.restartTimes)-spinMemory:]
 	}
 
-	// Need at least 3 restarts to detect spinning
-	if len(w.restartTimes) < 3 {
+	// Need at least spinMinExits to detect spinning
+	if len(w.restartTimes) < spinMinExits {
 		return false
 	}
 
-	// Check if we have ≥3 restarts within 5 seconds
-	threshold := now.Add(-5 * time.Second)
+	// Check if we have spinMinExits within spinWindow
+	threshold := now.Add(-spinWindow)
 	recentRestarts := 0
 	for _, t := range w.restartTimes {
 		if t.After(threshold) {
@@ -461,7 +474,7 @@ func (w *Makedog) checkForSpin() bool {
 		}
 	}
 
-	return recentRestarts >= 3
+	return recentRestarts >= spinMinExits
 }
 
 // clearSpinTracking clears the restart tracking, called when process runs successfully.
