@@ -24,10 +24,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	dispatch(args)
+}
+
+// dispatch routes args to a verb; help re-enters it with --help appended.
+func dispatch(args []string) {
 	switch first := args[0]; {
 	case first == "-h" || first == "--help":
 		usage()
 		os.Exit(0)
+	case first == "help":
+		helpMain(args[1:])
 	case first == "version" || first == "--version":
 		fmt.Printf("makedog %s\n", version)
 		os.Exit(0)
@@ -36,6 +43,9 @@ func main() {
 	case first == "show":
 		if len(args) < 2 {
 			fatal("show: which run? (a number, or latest)")
+		}
+		if args[1] == "-h" || args[1] == "--help" {
+			showMain("latest", args[1:])
 		}
 		showMain(args[1], args[2:])
 	case first == "runs":
@@ -72,6 +82,26 @@ func main() {
 	}
 }
 
+// helpMain implements `makedog help [verb]`: the overview, or a verb's page
+// by way of its own --help, so the options shown are the ones it parses.
+func helpMain(args []string) {
+	if len(args) == 0 {
+		usage()
+		os.Exit(0)
+	}
+	verb := args[0]
+	switch {
+	case verb == "grep":
+		verb = "search"
+	case verb == "show" || isRunRef(verb):
+		verb = "latest"
+	}
+	if _, ok := verbDocs[verb]; !ok && verb != "latest" {
+		fatal("help: unknown verb '%s' (try makedog --help)", verb)
+	}
+	dispatch([]string{verb, "--help"})
+}
+
 // fatal reports an error and exits.
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "makedog: "+format+"\n", args...)
@@ -81,8 +111,7 @@ func fatal(format string, args ...any) {
 // watchMain implements the watch verb: supervise a binary under the monitor loop.
 func watchMain(args []string) {
 	fs := newVerbFlags("watch")
-	configPath := fs.String("c", "", "path to config file")
-	fs.StringVar(configPath, "config", "", "path to config file")
+	configPath := fs.String("<path>", "Path to a configuration file, rather than searching for .makedog.toml", "c", "config")
 	parseVerbFlags(fs, args)
 
 	if fs.NArg() < 1 {

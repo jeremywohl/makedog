@@ -310,8 +310,7 @@ func findInstances(dirFlag, binaryFlag string) ([]instanceInfo, error) {
 // statusMain implements `makedog status`: every live instance in the project.
 func statusMain(args []string) {
 	fs := newVerbFlags("status")
-	jsonOut := fs.Bool("json", false, "emit one JSON object per instance")
-	fs.BoolVar(jsonOut, "jsonl", false, "emit one JSON object per instance")
+	jsonOut := fs.Bool("One JSON object per instance", "json", "jsonl")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, args)
 
@@ -383,9 +382,8 @@ func pickInstance(dir, binary string, pid int, verb string) instanceInfo {
 // plus signal (with its name in req.Signal).
 func controlMain(req ctrlRequest, args []string) {
 	fs := newVerbFlags(req.Cmd)
-	jsonOut := fs.Bool("json", false, "emit the instance's response as JSON")
-	fs.BoolVar(jsonOut, "jsonl", false, "emit the instance's response as JSON")
-	instance := fs.Int("instance", 0, "target this makedog pid, when several are live")
+	instance := fs.Int(0, "<pid>", "Target this makedog pid, when several are live", "instance")
+	jsonOut := fs.Bool("The instance's response as JSON", "json", "jsonl")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, args)
 
@@ -414,6 +412,9 @@ func controlMain(req ctrlRequest, args []string) {
 
 // signalMain implements `makedog signal <name>`.
 func signalMain(args []string) {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		controlMain(ctrlRequest{Cmd: "signal"}, args)
+	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		fatal("signal: which signal? (e.g. HUP, USR1)")
 	}

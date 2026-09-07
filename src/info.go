@@ -6,7 +6,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -22,10 +21,11 @@ func splitRef(args []string) (string, []string) {
 	return "", args
 }
 
-// lineageFlags declares the flags path and info share, returning the getters.
-func lineageFlags(fs *flag.FlagSet) (binary, dir *string) {
-	return fs.String("binary", "", "which binary's runs"),
-		fs.String("C", "", "project directory (default: current)")
+// lineageFlags declares the two flags every verb but watch takes, last in
+// the help, returning the getters.
+func lineageFlags(fs *verbFlags) (binary, dir *string) {
+	return fs.String("<path>", "Which binary's runs, when several are recorded", "binary"),
+		fs.String("<dir>", "Another project directory", "C")
 }
 
 // pathMain implements `makedog path [ref]`: the run log's file path, or the
@@ -105,8 +105,7 @@ func infoMain(args []string) {
 		ref = "latest"
 	}
 	fs := newVerbFlags("info")
-	jsonOut := fs.Bool("json", false, "emit the card as one JSON object")
-	fs.BoolVar(jsonOut, "jsonl", false, "emit the card as one JSON object")
+	jsonOut := fs.Bool("The card as one JSON object", "json", "jsonl")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, rest)
 	if fs.NArg() > 0 {

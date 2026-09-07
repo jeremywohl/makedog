@@ -36,7 +36,7 @@ func diffMain(args []string) {
 	}
 
 	fs := newVerbFlags("diff")
-	plain := fs.Bool("plain", false, "no color on change lines")
+	plain := fs.Bool("No color on change lines", "plain")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, rest)
 	if fs.NArg() > 0 {

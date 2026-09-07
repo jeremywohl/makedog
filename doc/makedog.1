@@ -5,8 +5,7 @@ makedog \- a runner for server binaries: restart on builds, log every
 run, send signals, run make targets, and more
 .SH SYNOPSIS
 .B makedog
-.B watch
-[\fIOPTIONS\fR] \fIbinary-path\fR
+[\fBwatch\fR] [\fB\-c\fR \fIconfig\fR] \fIbinary-path\fR
 .br
 .B makedog
 \fIrun#\fR|\fBlatest\fR[\fB~\fIN\fR] [\fIOPTIONS\fR]
@@ -20,7 +19,15 @@ run, send signals, run make targets, and more
 \fIregex\fR [\fIOPTIONS\fR]
 .br
 .B makedog
-.BR status | restart | stop | start
+.BR info | path
+[\fIref\fR] [\fIOPTIONS\fR]
+.br
+.B makedog
+.B diff
+[\fIa\fR [\fIb\fR]] [\fIOPTIONS\fR]
+.br
+.B makedog
+.BR status | restart | stop | start | quit
 [\fIOPTIONS\fR]
 .br
 .B makedog
@@ -30,6 +37,10 @@ run, send signals, run make targets, and more
 .B makedog
 .B loglevel
 [\fIlevel\fR] [\fIOPTIONS\fR]
+.br
+.B makedog
+.B help
+[\fIverb\fR]
 .SH DESCRIPTION
 .B makedog
 supervises a server binary during development. It starts the binary,
@@ -163,75 +174,148 @@ acknowledgment (a prompt, or
 a signal or command level pokes the live run, and the next restart
 reverts to baseline either way. Permanent levels belong in the
 project's own configuration.
+.TP
+.BR help " [\fIverb\fR]"
+The overview, or one verb's page: its options, exit status, and examples.
+.B makedog
+\fIverb\fR
+.B \-\-help
+is the same page.
 .SH OPTIONS
-.SS Watch options
+Each verb takes the options listed under it and no others;
+.B makedog
+\fIverb\fR
+.B \-\-help
+prints the same list. The common options are described once, at the end.
+.SS watch
 .TP
 .BR \-c ", " \-\-config " \fIpath\fR"
-Path to a specific configuration file, rather than searching for one.
-.SS Read options (show, current, next, tail)
+Path to a configuration file, rather than searching for
+.BR .makedog.toml .
+.SS show (a run reference), current
 .TP
 .BR \-f ", " \-\-follow
-Keep streaming until the run exits (show, current).
+Keep streaming until the run exits.
 .TP
 .BI \-n " count"
 Only the last \fIcount\fR records.
 .TP
 .BI \-\-since " age"
-Only records within this age, like 30s or 5m (show, current).
+Only records within this age, like 30s or 5m.
 .TP
 .BI \-\-until " regex"
-Stream until a line matches: exit 0 if matched, 1 if the run ended
-first.
+Stream until a line matches (implies
+.BR \-\-follow ):
+exit 0 if matched, 1 if the run ended first.
 .TP
 .BI \-\-timeout " duration"
-Give up after this duration (e.g. 30s), exit 2.
-.SS Runs options
+Give up after this duration, like 30s, exit 2.
+.PP
+Also
+.BR \-\-json ", " \-\-plain ", " \-\-binary ", " \-C .
+.SS next
+.TP
+.BI \-\-until " regex"
+Stream until a line matches: exit 0 if matched, 1 if the run ended first.
+.TP
+.BI \-\-timeout " duration"
+Give up after this duration, like 30s, exit 2.
+.PP
+Also
+.BR \-\-json ", " \-\-plain ", " \-\-binary ", " \-C .
+.SS tail
+.TP
+.BI \-n " count"
+Initial backlog from the current run, default 10; successors stream
+whole from their first line.
+.TP
+.BI \-\-until " regex"
+Stream until a line matches, exit 0.
+.TP
+.BI \-\-timeout " duration"
+Give up after this duration, like 30s, exit 2.
+.PP
+Also
+.BR \-\-json ", " \-\-plain ", " \-\-binary ", " \-C .
+.SS runs
 .TP
 .B \-\-long
 Full metadata cards, as
 .B info
 shows.
-.SS Search options
+.PP
+Also
+.BR \-\-json ", " \-\-binary ", " \-C .
+.SS search
 .TP
 .BI \-\-runs " a..b"
-Limit to a run number or range.
+Limit to a run number or range, like 130..135.
 .TP
 .BI \-\-since " age"
 Only runs active within this age, like 2d or 6h.
 .TP
 .B \-\-all\-binaries
 Search every binary recorded for the project.
-.SS Control options (status, restart, stop, start, signal, loglevel)
+.PP
+Also
+.BR \-\-json ", " \-\-plain ", " \-\-binary ", " \-C .
+.SS info
+.BR \-\-json ", " \-\-binary ", " \-C .
+.SS path
+.BR \-\-binary ", " \-C .
+.SS diff
+.BR \-\-plain ", " \-\-binary ", " \-C .
+.SS status
+.BR \-\-json ", " \-\-binary ", " \-C .
+.SS restart, stop, start, quit, signal
 .TP
 .BI \-\-instance " pid"
-Target this makedog pid, when several are live. Mutating verbs require
-it whenever more than one instance is running.
-.TP
-.B \-\-restart
-Permit the restart an env-applied
-.B loglevel
-requires.
+Target this makedog pid. Required whenever more than one instance is
+live;
+.B status
+lists them.
+.PP
+Also
+.BR \-\-json ", " \-\-binary ", " \-C .
+.SS loglevel
 .TP
 .B \-\-list
 List the levels the
 .B [loglevel]
-configuration defines, or the generic setting.
-.SS Shared options (all but watch)
+configuration defines, or the generic setting. Bare
+.B loglevel
+does the same.
+.TP
+.B \-\-restart
+Permit the restart an env-applied level requires, without asking.
+.TP
+.BI \-\-instance " pid"
+Target this makedog pid, when several are live.
+.PP
+Also
+.BR \-\-json ", " \-\-binary ", " \-C .
+.SS Common options
 .TP
 .BR \-\-json ", " \-\-jsonl
-Emit raw JSONL records.
+Machine-readable output: raw JSONL records from the readers, one
+object per run or instance from the listers, the card or response as
+one object elsewhere.
 .TP
 .B \-\-plain
-Strip ANSI styling.
+Strip ANSI: the binary's own escapes and makedog's colors. In
+.BR search ,
+hits only; in
+.BR diff ,
+no color on change lines.
 .TP
 .BI \-\-binary " path"
 Which binary's runs, when several are recorded for the project.
 .TP
 .BI \-C " dir"
-Operate on another project directory's runs.
+Operate on another project directory.
 .TP
 .BR \-h ", " \-\-help
-Print help.
+The verb's page: options, exit status, and examples.
 .SH INTERACTIVE KEYS
 While watching, makedog reads single keypresses from the terminal:
 .TP
@@ -384,12 +468,19 @@ is unset: the store lives in $XDG_STATE_HOME/makedog.
 Pager for replayed runs when stdout is a terminal (default "less
 \-FRX").
 .SH EXIT STATUS
-.B search
-exits 0 on a match, 1 when nothing matches. With
-.BR \-\-until ,
-readers exit 0 when a line matches, 1 when the run ends first, and 2 on
+The readers exit 0 when the run was shown or
+.B \-\-until
+matched, 1 when the run ended before
+.B \-\-until
+matched, and 2 on
 .B \-\-timeout
-expiry. Other verbs exit 0 on success and nonzero on error.
+expiry or when no run turns up.
+.B search
+exits 0 on a match, 1 when nothing matches.
+.B diff
+exits 0 when the runs' output is identical, 1 when it differs, and 2 on
+trouble, like a bad reference. Other verbs exit 0 on success and
+nonzero on error; a flag error exits 2.
 .SH EXAMPLES
 Supervise a server and restart it whenever it is rebuilt:
 .PP

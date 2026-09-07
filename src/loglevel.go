@@ -388,11 +388,10 @@ func loglevelMain(args []string) {
 		level, args = args[0], args[1:]
 	}
 	fs := newVerbFlags("loglevel")
-	list := fs.Bool("list", false, "list the levels the config defines")
-	restart := fs.Bool("restart", false, "permit the restart an env level requires, without asking")
-	jsonOut := fs.Bool("json", false, "emit the instance's response as JSON")
-	fs.BoolVar(jsonOut, "jsonl", false, "emit the instance's response as JSON")
-	instance := fs.Int("instance", 0, "target this makedog pid, when several are live")
+	list := fs.Bool("List the levels the config defines", "list")
+	restart := fs.Bool("Permit the restart an env level requires, without asking", "restart")
+	instance := fs.Int(0, "<pid>", "Target this makedog pid, when several are live", "instance")
+	jsonOut := fs.Bool("The instance's response as JSON", "json", "jsonl")
 	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, args)
 

@@ -48,28 +48,27 @@ func (r runRange) contains(n int) bool {
 
 // searchMain implements `makedog search <pattern>` (alias: grep).
 func searchMain(args []string) {
-	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		usage()
-		os.Exit(0)
-	}
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		fatal("search: what pattern?")
-	}
-	re, err := regexp.Compile(args[0])
-	if err != nil {
-		fatal("bad pattern: %v", err)
+	pattern := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		pattern, args = args[0], args[1:]
 	}
 
 	fs := newVerbFlags("search")
-	jsonOut := fs.Bool("json", false, "emit matching records as JSONL, with run and binary set")
-	fs.BoolVar(jsonOut, "jsonl", false, "emit matching records as JSONL, with run and binary set")
-	plain := fs.Bool("plain", false, "strip ANSI styling from hits")
-	runsFlag := fs.String("runs", "", "limit to a run number or range, like 130..135")
-	since := fs.String("since", "", "only runs active within this age, like 2d or 6h")
-	allBinaries := fs.Bool("all-binaries", false, "search every binary recorded for the project")
-	binary := fs.String("binary", "", "which binary's runs")
-	dir := fs.String("C", "", "project directory (default: current)")
-	parseVerbFlags(fs, args[1:])
+	runsFlag := fs.String("<a..b>", "Limit to a run number or range, like 130..135", "runs")
+	since := fs.String("<age>", "Only runs active within this age, like 2d or 6h", "since")
+	allBinaries := fs.Bool("Search every binary recorded for the project", "all-binaries")
+	jsonOut := fs.Bool("Matching records as JSONL, with run and binary set", "json", "jsonl")
+	plain := fs.Bool("Strip the binary's ANSI escapes from hits", "plain")
+	binary, dir := lineageFlags(fs)
+	parseVerbFlags(fs, args)
+
+	if pattern == "" {
+		fatal("search: what pattern?")
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		fatal("bad pattern: %v", err)
+	}
 
 	scope := searchScope{}
 	if *runsFlag != "" {

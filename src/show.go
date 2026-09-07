@@ -13,7 +13,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -84,47 +83,52 @@ func (o *showOptions) expired() bool {
 	return !o.deadline.IsZero() && time.Now().After(o.deadline)
 }
 
-// readFlags declares the flags every read verb shares; verbs add their own to
-// fs before parse.
+// readFlags is a read verb's flag set. The verb declares its own flags
+// first, so they lead its help; parse adds the ones every read verb shares.
 type readFlags struct {
-	fs      *flag.FlagSet
-	until   *string
-	timeout *time.Duration
-	binary  *string
-	dir     *string
+	fs *verbFlags
 }
 
-func newReadFlags(name string, opts *showOptions) *readFlags {
-	fs := newVerbFlags(name)
-	fs.BoolVar(&opts.json, "json", false, "emit raw JSONL records")
-	fs.BoolVar(&opts.json, "jsonl", false, "emit raw JSONL records")
-	fs.BoolVar(&opts.plain, "plain", false, "strip ANSI styling")
-	return &readFlags{
-		fs:      fs,
-		until:   fs.String("until", "", "stream until a line matches this regex"),
-		timeout: fs.Duration("timeout", 0, "give up after this duration (exit 2)"),
-		binary:  fs.String("binary", "", "which binary's runs"),
-		dir:     fs.String("C", "", "project directory (default: current)"),
-	}
+func newReadFlags(name string) *readFlags {
+	return &readFlags{fs: newVerbFlags(name)}
 }
 
-// parse finalizes the shared flags into opts and resolves the target lineage.
+// selectionFlags declares the flags that pick which records of a run to show
+// (show, current); the follow and last-N settings land in opts, and --since
+// is returned for the caller to parse.
+func selectionFlags(rf *readFlags, opts *showOptions) *string {
+	rf.fs.BoolVar(&opts.follow, "Keep streaming until the run exits", "f", "follow")
+	rf.fs.IntVar(&opts.lastN, "<count>", "Only the last N records", "n")
+	return rf.fs.String("<age>", "Only records within this age, like 30s or 5m", "since")
+}
+
+// parse declares the shared read flags, parses args into opts, and resolves
+// the target lineage.
 func (r *readFlags) parse(args []string, opts *showOptions) *binaryStore {
+	untilHelp := "Stream until a line matches, exit 0"
+	if r.fs.Lookup("follow") != nil {
+		untilHelp += " (implies --follow)"
+	}
+	until := r.fs.String("<regex>", untilHelp, "until")
+	timeout := r.fs.Duration("<dur>", "Give up after this duration, like 30s, exit 2", "timeout")
+	r.fs.BoolVar(&opts.json, "Raw JSONL records", "json", "jsonl")
+	r.fs.BoolVar(&opts.plain, "Strip ANSI: the binary's own escapes and makedog's colors", "plain")
+	binary, dir := lineageFlags(r.fs)
 	parseVerbFlags(r.fs, args)
 
-	if *r.until != "" {
-		re, err := regexp.Compile(*r.until)
+	if *until != "" {
+		re, err := regexp.Compile(*until)
 		if err != nil {
 			fatal("bad --until pattern: %v", err)
 		}
 		opts.until = re
 		opts.follow = true
 	}
-	if *r.timeout > 0 {
-		opts.deadline = time.Now().Add(*r.timeout)
+	if *timeout > 0 {
+		opts.deadline = time.Now().Add(*timeout)
 	}
 
-	store, err := openLineage(*r.dir, *r.binary)
+	store, err := openLineage(*dir, *binary)
 	if err != nil {
 		fatal("%v", err)
 	}
@@ -134,11 +138,8 @@ func (r *readFlags) parse(args []string, opts *showOptions) *binaryStore {
 // showMain implements `makedog <ref>` and `makedog show <ref>`.
 func showMain(refArg string, args []string) {
 	opts := showOptions{}
-	rf := newReadFlags("show", &opts)
-	rf.fs.BoolVar(&opts.follow, "f", false, "follow output as it arrives")
-	rf.fs.BoolVar(&opts.follow, "follow", false, "follow output as it arrives")
-	rf.fs.IntVar(&opts.lastN, "n", 0, "only the last N records")
-	since := rf.fs.String("since", "", "only records within this age, like 30s or 5m")
+	rf := newReadFlags("show")
+	since := selectionFlags(rf, &opts)
 
 	ref, ok := parseRunRef(refArg)
 	if !ok {
@@ -174,11 +175,8 @@ func showMain(refArg string, args []string) {
 // it went.
 func currentMain(args []string) {
 	opts := showOptions{}
-	rf := newReadFlags("current", &opts)
-	rf.fs.BoolVar(&opts.follow, "f", false, "follow output as it arrives")
-	rf.fs.BoolVar(&opts.follow, "follow", false, "follow output as it arrives")
-	rf.fs.IntVar(&opts.lastN, "n", 0, "only the last N records")
-	since := rf.fs.String("since", "", "only records within this age, like 30s or 5m")
+	rf := newReadFlags("current")
+	since := selectionFlags(rf, &opts)
 	store := rf.parse(args, &opts)
 	if *since != "" {
 		age, err := parseAge(*since)
@@ -269,7 +267,7 @@ func newestRunHash(store *binaryStore) (int, string) {
 // latest, stream it from the start, and end by seal, match, or timeout.
 func nextMain(args []string) {
 	opts := showOptions{follow: true}
-	rf := newReadFlags("next", &opts)
+	rf := newReadFlags("next")
 	store := rf.parse(args, &opts)
 
 	baseline := 0
@@ -297,8 +295,8 @@ func nextMain(args []string) {
 // --until match, a --timeout, or an interrupt.
 func tailMain(args []string) {
 	opts := showOptions{follow: true}
-	rf := newReadFlags("tail", &opts)
-	lastN := rf.fs.Int("n", 10, "initial backlog from the current run")
+	rf := newReadFlags("tail")
+	lastN := rf.fs.Int(10, "<count>", "Initial backlog from the current run", "n")
 	store := rf.parse(args, &opts)
 
 	current := 0
@@ -631,11 +629,9 @@ type runSummary struct {
 // runsMain implements `makedog runs`.
 func runsMain(args []string) {
 	fs := newVerbFlags("runs")
-	jsonOut := fs.Bool("json", false, "emit JSONL summaries")
-	fs.BoolVar(jsonOut, "jsonl", false, "emit JSONL summaries")
-	long := fs.Bool("long", false, "full metadata cards, as info shows")
-	binary := fs.String("binary", "", "which binary's runs")
-	dir := fs.String("C", "", "project directory (default: current)")
+	long := fs.Bool("Full metadata cards, as info shows", "long")
+	jsonOut := fs.Bool("One JSON summary per run", "json", "jsonl")
+	binary, dir := lineageFlags(fs)
 	parseVerbFlags(fs, args)
 
 	store, err := openLineage(*dir, *binary)

@@ -114,7 +114,8 @@ Example invocations:
   `makedog restart | stop | start | status`. `makedog signal <SIG>`
   delivers whatever the app wired that signal to — know the handler
   before sending.
-- See `makedog --help` for more details.
+- See `makedog --help` for the overview, and `makedog <verb> --help` for a
+  verb's options, exit codes, and examples.
 ```
 
 ## Run logs
