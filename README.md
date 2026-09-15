@@ -36,7 +36,7 @@ keys: 'c' to clear screen, 'h' for this help, 'k' to mark log, 'l' to set log le
 
 While it runs, single keys drive it: `r` restart, `x` stop/start, `s` signal menu, `t` make-target menu, `l` log level menu, `k` mark the log, `q` quit.
 
-Read back what happened:
+From another terminal, read back what's happened or happening. Results are real time.
 
 ```console
 $ makedog runs                 # list recorded runs
@@ -44,17 +44,17 @@ $ makedog latest               # replay the latest run (possibly live)
 $ makedog latest~1 --plain     # the run before, ANSI stripped
 $ makedog current              # the run of the build on disk, waiting if needed
 $ makedog diff                 # what changed between the last two runs?
-$ makedog crash                # the runs behind a spin stop, back to back
+$ makedog crash                # the runs where we detected the binary spinning
 $ makedog search 'ERROR|panic' --since 2d
 ```
 
-Gate on readiness — after a rebuild, wait for the run of the binary now on disk to say it's up:
+Gate on readiness. After a rebuild, wait for the run of the binary now on disk to say it's up.
 
 ```console
 $ make && makedog current --until 'listening on' --timeout 30s
 ```
 
-Exit 0 when the line matches, 1 if the run ends first, 2 on timeout. `current` keys on the binary's hash, so it works called at any point after the build: it returns at once when that run is already up (even if a no-op build restarted nothing), and waits for the restart otherwise. (`next` remains the pure event form — wait for whatever run starts next.)
+Exit 0 when the line matches, 1 if the run ends first, 2 on timeout. `current` keys on the binary's hash, so it works called at any point after the build: it returns at once when that run is already up (even if a no-op build restarted nothing), and waits for the restart otherwise. (`next` waits for whatever run starts next.)
 
 Poke the live process from another terminal:
 
@@ -112,7 +112,7 @@ Example invocations:
   start): `makedog crash` prints those runs back to back, exit first.
 - If the project defines log levels (`makedog loglevel --list`), raise
   verbosity for one run with `makedog loglevel debug --restart`; it
-  reverts on the next restart.
+  reverts on the start after that.
 - Human-driven, rarely for agents (rebuilds already restart the server):
   `makedog restart | stop | start | status`. `makedog signal <SIG>`
   delivers whatever the app wired that signal to — know the handler
@@ -123,9 +123,7 @@ Example invocations:
 
 ## Run logs
 
-Every run is recorded as JSONL — one record per output line, plus lifecycle events (starts, stops, signals, marks, make invocations) — under `~/.local/state/makedog` (override with `MAKEDOG_STATE_DIR`).
-
-Read them with:
+Every execution of your binary is a *run*. Every line of output and every lifecycle event is recorded, and can be read back:
 
 | verb | does |
 |---|---|
@@ -137,10 +135,12 @@ Read them with:
 | `search <regex>` | grep recorded runs; `--runs 30..34`, `--since 6h`, `--all-binaries` |
 | `info [ref]` | one run's metadata card |
 | `diff [a [b]]` | unified diff of two runs' output |
-| `crash` | the runs that tripped the spin stop, back to back; exit 1 when none did |
+| `crash` | the runs that failed on start, causing makedog to pause |
 | `path [ref]` | the log's file path |
 
-All readers take `--json` for raw records, `--plain` to strip ANSI, `--binary` to pick among a project's binaries, and `-C dir` to reach another project.
+These all take `--json` for raw records, `--plain` to strip ANSI, `--binary` to pick among a project's binaries, and `-C dir` to reach another project.
+
+Runs are recorded as JSONL: one record per output line, plus lifecycle events (starts, stops, signals, marks, make invocations). Kept under `~/.local/state/makedog` (override with `MAKEDOG_STATE_DIR`).
 
 Older logs are compressed in the background (zstd, after 24h idle) and pruned by count, age, or total size per the retention policy. The newest two runs are always left untouched.
 
