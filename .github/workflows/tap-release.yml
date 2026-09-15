@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out release
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Verify tag matches src/version.go
         run: |
@@ -45,7 +45,7 @@ jobs:
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Check out tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jeremywohl/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
